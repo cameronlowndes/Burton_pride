@@ -2,9 +2,9 @@
 import {
   classify,
   validPolicy,
-  type Policy,
+  type Decision,
   type Platform,
-} from "../_shared/moderation";
+} from "../_shared/moderation.ts";
 declare const Deno: {
   env: { get(name: string): string | undefined };
   serve(handler: (request: Request) => Promise<Response>): void;
@@ -124,6 +124,27 @@ async function connection(platform: Platform) {
     };
   }
 }
+function reviewDecision(content: string, version: number, configuredPolicy: unknown): Decision {
+  const normal = content.normalize("NFKC").toLocaleLowerCase("en-GB");
+  const configured = validPolicy(configuredPolicy) ? classify(content, configuredPolicy) : null;
+  const categories = new Set(configured?.categories ?? []);
+  if (/\b(?:i|we)\s+(?:will|shall|am going to|are going to)\s+(?:kill|shoot|stab|attack|hurt)\b|\b(?:kill|shoot|stab|attack)\s+(?:all|every)\b/.test(normal)) {
+    categories.add("threat");
+  }
+  if (/\b(?:kill yourself|go kill yourself|take your own life)\b/.test(normal)) {
+    categories.add("abuse");
+  }
+  const flagged = categories.size > 0;
+  return {
+    decision: flagged ? "review" : "allow",
+    categories: [...categories],
+    policyVersion: String(version),
+    reason: flagged
+      ? "Possible policy breach. An authorised moderator must assess context and severity."
+      : "No review signal matched. This is not a comprehensive safety assessment.",
+    actionStatus: flagged ? "review" : "none",
+  };
+}
 Deno.serve(async (request) => {
   if (request.method !== "POST")
     return new Response("Method not allowed", { status: 405 });
@@ -141,18 +162,20 @@ Deno.serve(async (request) => {
     const state = await rpc("begin", { p_lease: lease });
     if (!state) return Response.json({ skipped: true });
     const started = Date.now();
-    const connections = await Promise.all([
-      connection("facebook"),
-      connection("instagram"),
+    const [connections, policies] = await Promise.all([
+      Promise.all([connection("facebook"), connection("instagram")]),
+      db("moderation_policy_versions?select=version&approved_at=not.is.null&order=version.desc&limit=1", undefined, "GET"),
     ]);
+    const policy = policies?.[0];
+    const policyApproved = Number.isSafeInteger(policy?.version) && policy.version > 0;
     const ready = await rpc("ready", {
       p_lease: lease,
       p_generation: state.generation,
       p_connections: connections,
-      p_policy_valid: validPolicy(state.policy),
+      p_policy_valid: policyApproved,
     });
     let processed = 0;
-    if (ready && validPolicy(state.policy)) {
+    if (ready && policyApproved) {
       // Stop claiming before the 55s lease expires; each job is bounded to <20s.
       while (Date.now() - started < 23000 && processed < 5) {
         const job = await rpc("claim", {
@@ -165,40 +188,7 @@ Deno.serve(async (request) => {
             throw new Error(
               "Job account no longer matches the configured account",
             );
-          const decision = classify(job.content, state.policy as Policy);
-          if (decision.decision === "hide") {
-            const existing = await db(
-              `moderation_actions?platform=eq.${job.platform}&comment_id=eq.${job.comment_id}&action=eq.hide&select=applied_at`,
-              undefined,
-              "GET",
-            );
-            if (!existing?.[0]?.applied_at) {
-              // Target-state writes are idempotent if a crash happens after Meta succeeds.
-              await graph(
-                job.platform,
-                encodeURIComponent(job.comment_id),
-                job.platform === "facebook"
-                  ? { is_hidden: "true" }
-                  : { hide: "true" },
-              );
-              await db(
-                "moderation_actions?on_conflict=platform,comment_id,action",
-                {
-                  platform: job.platform,
-                  comment_id: job.comment_id,
-                  action: "hide",
-                  applied_at: new Date().toISOString(),
-                },
-                "POST",
-              ).catch(async () => {
-                await db(
-                  `moderation_actions?platform=eq.${job.platform}&comment_id=eq.${job.comment_id}&action=eq.hide`,
-                  { applied_at: new Date().toISOString() },
-                  "PATCH",
-                );
-              });
-            }
-          }
+          const decision = reviewDecision(job.content, policy.version, state.policy);
           await rpc("finish", {
             p_lease: lease,
             p_job: job.id,

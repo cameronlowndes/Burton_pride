@@ -5,12 +5,16 @@ import {
   uptime,
 } from "@/supabase/functions/_shared/moderation";
 const API = "/api/admin/social-media-moderation/server";
+const POLICY_API = "/api/admin/social-media-moderation/policy-status";
+const TERMS_PAGE = "/Admin/SocialMediaModeration/Terms";
 const button =
   "min-h-11 cursor-pointer rounded-xl border border-white/20 px-4 py-2 text-sm font-semibold hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-purple-300 disabled:cursor-not-allowed disabled:opacity-50";
 const field =
   "mt-2 min-h-12 w-full rounded-xl border border-slate-500 bg-slate-950 p-3 text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-purple-300";
 const card = "rounded-3xl border border-white/15 bg-slate-900/70 p-5 sm:p-6";
 type Action = "stop" | "restart" | "refresh";
+type ApprovedPolicy = { id: string; version: number; approved_at: string };
+type PolicyStatus = { ok: true; policy: ApprovedPolicy | null };
 type Snapshot = {
   serverTime: string;
   canControl: boolean;
@@ -92,6 +96,7 @@ async function request(path: string, payload?: unknown, signal?: AbortSignal) {
 }
 export default function ModerationServerControl() {
   const [data, setData] = useState<Snapshot | null>(null);
+  const [policyStatus, setPolicyStatus] = useState<PolicyStatus | "unavailable" | null>(null);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -112,12 +117,18 @@ export default function ModerationServerControl() {
   const passwordRef = useRef<HTMLInputElement>(null);
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
-      const result = await request(API, undefined, signal);
+      const [result, policyResult] = await Promise.all([
+        request(API, undefined, signal),
+        request(POLICY_API, undefined, signal).catch(() => "unavailable" as const),
+      ]);
+      if (signal?.aborted) return;
+      setPolicyStatus(policyResult);
       offset.current = Date.parse(result.serverTime) - Date.now();
       setData(result);
       setError("");
     } catch (e) {
       if (signal?.reason === "unmount") return;
+      setPolicyStatus("unavailable");
       if ([401, 403].includes((e as { status?: number }).status || 0))
         setData(null);
       setError(e instanceof Error ? e.message : "Dashboard unavailable.");
@@ -258,6 +269,11 @@ export default function ModerationServerControl() {
   };
   const s = data?.service;
   const current = now + offset.current;
+  const hasApprovedPolicy = !!(policyStatus && policyStatus !== "unavailable" && policyStatus.policy);
+  const serviceWarning = hasApprovedPolicy &&
+    s?.error?.trim() === "Moderation paused: verify both Meta connections and approve a moderation policy."
+    ? "Moderation is paused. A policy is approved. Check the connection status below."
+    : s?.error;
   const status = s ? effectiveStatus(s, current) : "Unknown";
   const health = error
     ? "Unavailable"
@@ -302,12 +318,36 @@ export default function ModerationServerControl() {
             </button>
           </div>
         ) : null}
-        {s?.error ? (
+        {data && (
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/15 bg-slate-950/50 p-4">
+            <div>
+              <h3 className="font-semibold">Moderation policy</h3>
+              <p className="mt-1 text-sm text-slate-300" role="status">
+                {policyStatus === "unavailable"
+                  ? "Approval status unavailable. Refresh status to try again."
+                  : !policyStatus
+                    ? "Checking approval status…"
+                    : policyStatus.policy
+                      ? `Version ${policyStatus.policy.version} approved on ${date(policyStatus.policy.approved_at)}.`
+                      : "Awaiting approval. No approved version is on record."}
+              </p>
+            </div>
+            <a
+              className={button + " inline-flex items-center"}
+              href={policyStatus && policyStatus !== "unavailable" && policyStatus.policy
+                ? TERMS_PAGE + "?version=" + encodeURIComponent(policyStatus.policy.id)
+                : TERMS_PAGE}
+            >
+              View terms
+            </a>
+          </div>
+        )}
+        {serviceWarning ? (
           <p
             role="alert"
             className="mt-4 rounded-xl border border-amber-300/40 bg-amber-500/10 p-4 text-sm text-amber-100"
           >
-            {s.error}
+            {serviceWarning}
           </p>
         ) : null}
         {s && status === "Error" && !s.error ? (

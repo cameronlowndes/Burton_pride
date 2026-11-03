@@ -200,7 +200,7 @@ function drawServerMessage(value: unknown): string | null {
     INTEGRITY_WARNINGS: "Unresolved integrity warnings must be reviewed before drawing.",
     EXISTING_DRAW_BLOCKED: "An active or completed draw, or existing winners, require review. Use the separate redraw process when appropriate.",
     MULTIPLE_PRIZE_QUANTITY: "Each available prize record must have quantity 1. Split multi-quantity prizes into separate records.",
-    INVALID_PRIZE_COUNT: "Check that 1–1,000 confirmed or available prize records exist, then refresh the checks.",
+    INVALID_PRIZE_COUNT: "Add at least one confirmed or available prize record, up to a maximum of 1,000, then refresh the checks.",
     INSUFFICIENT_TICKETS: "There must be at least one different eligible ticket for each prize.",
     INVALID_SNAPSHOT_COUNT: "The frozen ticket count is invalid or exceeds the supported limit of 100,000.",
     SNAPSHOT_INCOMPLETE: "The frozen ticket pool is incomplete. Review this failed draw and its audit log.",
@@ -480,6 +480,11 @@ function drawBlockReasons(
 
   if (readiness.metrics.prizes_available <= 0) {
     reasons.push("No prizes are available.");
+  }
+
+  if (readiness.metrics.eligible_tickets > 0 &&
+      readiness.metrics.eligible_tickets < readiness.metrics.prizes_available) {
+    reasons.push("Each available prize needs a different eligible ticket.");
   }
 
   const drawTime = readiness.lottery.draw_at
@@ -1922,8 +1927,9 @@ function ReadinessView({
       </div>
 
       <p className="mt-5 rounded-2xl border border-purple-400/25 bg-purple-500/10 p-4 text-sm leading-6 text-purple-100">
-        These are reported readiness counts. The draw request will
-        recheck eligibility and approval before selecting winners.
+        One available prize is enough for a draw. Each additional prize
+        needs a different eligible ticket. The server rechecks eligibility
+        and approval before selecting any winning tickets.
       </p>
 
       {canRetryFailedDraw(item, readiness) ? (
@@ -2019,7 +2025,9 @@ function ReadinessView({
             ) : canRun ? (
               <p className="mt-1 text-sm leading-6 text-white/75">
                 The checks allow you to request this draw. The server
-                will validate it again before selecting winners.
+                will validate it again before selecting {readiness.metrics.prizes_available === 1
+                  ? "one winning ticket"
+                  : `${readiness.metrics.prizes_available} different winning tickets`}.
               </p>
             ) : (
               <ul className="mt-3 list-disc space-y-2 pl-5 text-sm leading-6 text-white/80">
@@ -2084,8 +2092,9 @@ function DrawResultView({ result }: { result: DrawResult }) {
           <div>
             <h3 className="font-bold text-white">Draw complete</h3>
             <p className="mt-1 text-sm leading-6 text-white/75">
-              A completed draw result was returned. Review the winners
-              and audit log below.
+              {result.winners.length === 1
+                ? "One winning ticket was returned. Review the result and audit log below."
+                : `${result.winners.length} winning tickets were returned. Review the results and audit log below.`}
             </p>
           </div>
         </div>
@@ -2111,7 +2120,7 @@ function DrawResultView({ result }: { result: DrawResult }) {
         <div className="mb-4 flex items-center gap-2">
           <Trophy className="h-4 w-4 text-white/65" />
           <h3 className="text-lg font-bold text-white">
-            Winning tickets
+            {result.winners.length === 1 ? "Winning ticket" : "Winning tickets"}
           </h3>
         </div>
 

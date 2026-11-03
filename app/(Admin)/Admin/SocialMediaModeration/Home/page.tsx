@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getCurrentAdmin } from "@/lib/adminPermissions";
-import ModerationHomeClient from "../../components/SoicalMediaModeration/client/ModerationHomeClient";
+import ModerationHomeClient from "../../components/SocialMediaModeration/client/ModerationHomeClient";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;

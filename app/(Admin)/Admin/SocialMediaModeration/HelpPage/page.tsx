@@ -1,7 +1,7 @@
 
 import type { Metadata } from "next";
 
-import HelpPage from "../../components/SoicalMediaModeration/client/HelpPage";
+import HelpPage from "../../components/SocialMediaModeration/client/HelpPage";
 
 export const dynamic = "force-dynamic";
 

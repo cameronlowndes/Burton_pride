@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
 import {
   getAuthenticatedAdmin,
   getAuditServiceClient,
@@ -6,485 +7,593 @@ import {
   writeLotteryAuditSafe,
 } from "@/lib/lottery/audit-server";
 
-export const dynamic = "force-dynamic";
-export const runtime = "nodejs";
-
-const ALLOWED_STATUSES = new Set([
-  "draft",
-  "confirmed",
-  "available_for_draw",
-  "withdrawn",
-]);
-
-const PRIZEABLE_LOTTERY_STATUSES = [
-  "draft",
-  "compliance_review",
-  "scheduled",
-  "live",
-  "sales_closed",
-  "draw_ready",
-] as const;
-
-function response(body: unknown, status = 200) {
-  return NextResponse.json(body, {
-    status,
-    headers: {
-      "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-      "X-Content-Type-Options": "nosniff",
-    },
-  });
-}
-
-function isValidUuid(value: string) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-    value,
-  );
-}
-
-function optionalText(value: unknown) {
-  const text = String(value ?? "").trim();
-  return text || null;
-}
-
-function optionalMoney(value: unknown): number | null | undefined {
-  if (value === null || value === undefined || value === "") return null;
-  const amount = Number(value);
-  return Number.isFinite(amount) && amount >= 0 ? amount : undefined;
-}
-
-function valuesEqual(previous: unknown, next: unknown) {
-  if (previous == null && next == null) return true;
-  if (typeof next === "number") return Number(previous) === next;
-  return previous === next;
-}
+const TABLE = "lotteries";
+const REQUIRED_MINIMUM_AGE = 18;
 
 export async function GET() {
   try {
-    const admin = await getAuthenticatedAdmin();
+    const supabase = await createClient();
 
-    if (!admin) {
-      return response({ ok: false, error: "Unauthorized." }, 401);
-    }
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
 
-    if (!hasLotteryPermission(admin, "lottery:view")) {
-      return response(
-        { ok: false, error: "You do not have permission to view prizes." },
-        403,
+    if (authError || !user) {
+      return NextResponse.json(
+        { ok: false, error: "Unauthorized." },
+        { status: 401 },
       );
     }
 
-    const db = getAuditServiceClient();
-    const { data: prizes, error: prizeError } = await db
-      .from("lottery_prizes")
+    const { data, error } = await supabase
+      .from(TABLE)
       .select(`
         id,
-        lottery_id,
-        name,
-        description,
-        image_url,
-        quantity,
-        declared_value,
-        is_donated,
-        donor_name,
-        sponsor_name,
-        display_order,
-        eligibility_restrictions,
-        fulfilment_requirements,
-        fulfilment_notes,
+        title,
+        slug,
+        internal_reference,
+        lottery_type,
         status,
-        allocated_winner_id,
-        allocated_at,
-        claimed_at,
-        fulfilled_at,
-        unclaimed_at,
-        withdrawn_at,
+        short_summary,
+        ticket_price,
+        currency,
+        max_tickets,
+        paper_tickets_enabled,
+        paper_ticket_start_number,
+        paper_ticket_end_number,
+        paper_ticket_count,
+        minimum_age,
+        sales_open_at,
+        sales_close_at,
+        draw_at,
         created_at,
-        updated_at
+        updated_at,
+        archived_at,
+        is_active
       `)
-      .order("display_order", { ascending: true })
-      .order("created_at", { ascending: true });
+      .order("created_at", { ascending: false });
 
-    if (prizeError) {
-      console.error("Prize load error:", prizeError);
-      return response(
+    if (error) {
+      console.error("Lottery list error:", error);
+
+      return NextResponse.json(
         {
           ok: false,
-          error: "Unable to load prizes.",
-          supabaseCode: prizeError.code,
-          supabaseDetails: prizeError.details,
-          supabaseHint: prizeError.hint,
+          error: "Unable to load lotteries.",
+          supabaseCode: error.code,
+          supabaseDetails: error.details,
+          supabaseHint: error.hint,
         },
-        500,
+        { status: 500 },
       );
     }
 
-    const rows = prizes || [];
-    const lotteryIds = [...new Set(rows.map((item) => item.lottery_id))];
-    const winnerIds = [
-      ...new Set(rows.map((item) => item.allocated_winner_id).filter(Boolean)),
-    ] as string[];
+    const items = await Promise.all(
+      (data || []).map(async (lottery) => {
+        const [orders, tickets] = await Promise.all([
+          supabase
+            .from("lottery_orders")
+            .select("id,total_amount,payment_status", { count: "exact" })
+            .eq("lottery_id", lottery.id),
 
-    const [lotteriesResult, winnersResult, lotteryOptionsResult] = await Promise.all([
-      lotteryIds.length
-        ? db.from("lotteries").select("id,title,slug").in("id", lotteryIds)
-        : Promise.resolve({ data: [], error: null }),
-      winnerIds.length
-        ? db
-            .from("lottery_winners")
-            .select("id,winner_name,winner_email,claimed")
-            .in("id", winnerIds)
-        : Promise.resolve({ data: [], error: null }),
-      db
-        .from("lotteries")
-        .select("id,title,slug,status,is_active,draw_at")
-        .in("status", [...PRIZEABLE_LOTTERY_STATUSES])
-        .order("draw_at", { ascending: true, nullsFirst: false })
-        .order("title", { ascending: true }),
-    ]);
+          supabase
+            .from("lottery_tickets")
+            .select("id", { count: "exact", head: true })
+            .eq("lottery_id", lottery.id),
+        ]);
 
-    if (
-      lotteriesResult.error ||
-      winnersResult.error ||
-      lotteryOptionsResult.error
-    ) {
-      return response(
-        { ok: false, error: "Unable to load complete prize data." },
-        500,
-      );
-    }
+        const paidOrders = (orders.data || []).filter(
+          (order) => order.payment_status === "paid",
+        );
 
-    const lotteries = new Map(
-      (lotteriesResult.data || []).map((item) => [item.id, item]),
-    );
-    const winners = new Map(
-      (winnersResult.data || []).map((item) => [item.id, item]),
+        const revenue = paidOrders.reduce(
+          (sum, row) => sum + Number(row.total_amount || 0),
+          0,
+        );
+
+        return {
+          ...lottery,
+          order_count: orders.count || orders.data?.length || 0,
+          paid_order_count: paidOrders.length,
+          ticket_count: tickets.count || 0,
+          revenue,
+        };
+      }),
     );
 
-    const items = rows.map((prize) => {
-      const lottery = lotteries.get(prize.lottery_id);
-      const winner = prize.allocated_winner_id
-        ? winners.get(prize.allocated_winner_id)
-        : null;
-
-      return {
-        ...prize,
-        declared_value:
-          prize.declared_value === null ? null : Number(prize.declared_value),
-        lottery_title: lottery?.title || "Unknown lottery",
-        lottery_slug: lottery?.slug || "",
-        winner_name: winner?.winner_name || null,
-        winner_email: winner?.winner_email || null,
-        winner_claimed: winner?.claimed ?? null,
-      };
-    });
-
-    return response({
+    return NextResponse.json({
       ok: true,
       items,
-      lotteries: lotteryOptionsResult.data || [],
     });
   } catch (error) {
-    console.error("Prize API GET error:", error);
-    return response({ ok: false, error: "Unable to load prizes." }, 500);
+    console.error("Lottery API GET error:", error);
+
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "Unable to load lotteries.",
+      },
+      { status: 500 },
+    );
   }
 }
 
-export async function POST(request: NextRequest) {
+export async function POST(req: NextRequest) {
   try {
+    const supabase = await createClient();
     const admin = await getAuthenticatedAdmin();
 
-    if (!admin) {
-      return response({ ok: false, error: "Unauthorized." }, 401);
-    }
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
 
-    if (!hasLotteryPermission(admin, "lottery:prizes:manage")) {
-      return response(
-        { ok: false, error: "You do not have permission to create prizes." },
-        403,
+    if (authError || !user || !admin) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Unauthorized.",
+        },
+        { status: 401 },
       );
     }
 
-    let body: Record<string, unknown>;
-    try {
-      body = await request.json();
-    } catch {
-      return response({ ok: false, error: "The request body is not valid JSON." }, 400);
-    }
-
-    const lotteryId = String(body.lottery_id || "").trim();
-    const name = String(body.name || "").trim();
-    const quantity = Number(body.quantity ?? 1);
-    const status = String(body.status || "draft");
-    const declaredValue = optionalMoney(body.declared_value);
-    const displayOrder = Number(body.display_order ?? 0);
-
-    if (!isValidUuid(lotteryId)) {
-      return response({ ok: false, error: "A valid lottery is required." }, 400);
-    }
-
-    if (!name) {
-      return response({ ok: false, error: "Prize name is required." }, 400);
-    }
-
-    if (!Number.isInteger(quantity) || quantity <= 0) {
-      return response(
-        { ok: false, error: "Quantity must be a whole number above 0." },
-        400,
+    if (!hasLotteryPermission(admin, "lottery:create")) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "You do not have permission to create lotteries.",
+        },
+        { status: 403 },
       );
     }
 
-    if (declaredValue === undefined) {
-      return response({ ok: false, error: "Declared value is invalid." }, 400);
-    }
+    const body = await req.json();
 
-    if (!Number.isInteger(displayOrder) || displayOrder < 0) {
-      return response(
-        { ok: false, error: "Display order must be 0 or a positive whole number." },
-        400,
-      );
-    }
+    const prizes: { name: string; declared_value: number | null }[] = [];
+    if (body.prizes !== undefined) {
+      if (!Array.isArray(body.prizes) || body.prizes.length === 0) {
+        return NextResponse.json({ ok: false, error: "Enter at least one prize." }, { status: 400 });
+      }
 
-    if (!ALLOWED_STATUSES.has(status)) {
-      return response({ ok: false, error: "Invalid prize status." }, 400);
-    }
-
-    const db = getAuditServiceClient();
-    const { data: lottery, error: lotteryError } = await db
-      .from("lotteries")
-      .select("id,title")
-      .eq("id", lotteryId)
-      .maybeSingle();
-
-    if (lotteryError || !lottery) {
-      return response({ ok: false, error: "Lottery not found." }, 404);
-    }
-
-    const { data: created, error: createError } = await db
-      .from("lottery_prizes")
-      .insert({
-        lottery_id: lotteryId,
-        name,
-        description: optionalText(body.description),
-        image_url: optionalText(body.image_url),
-        quantity,
-        declared_value: declaredValue,
-        is_donated: Boolean(body.is_donated),
-        donor_name: optionalText(body.donor_name),
-        sponsor_name: optionalText(body.sponsor_name),
-        display_order: displayOrder,
-        eligibility_restrictions: optionalText(body.eligibility_restrictions),
-        fulfilment_requirements: optionalText(body.fulfilment_requirements),
-        fulfilment_notes: optionalText(body.fulfilment_notes),
-        status,
-      })
-      .select("*")
-      .single();
-
-    if (createError) {
-      console.error("Prize create error:", createError);
-      return response(
-        { ok: false, error: "Unable to create prize.", code: createError.code },
-        500,
-      );
-    }
-
-    await writeLotteryAuditSafe({
-      admin,
-      actionCode: "prize.created",
-      actionLabel: "Prize created",
-      actionGroup: "prize",
-      riskLevel: "medium",
-      entityType: "prize",
-      entityId: created.id,
-      reason: `Prize "${created.name}" was added to lottery "${lottery.title}".`,
-    });
-
-    return response({ ok: true, item: created }, 201);
-  } catch (error) {
-    console.error("Prize API POST error:", error);
-    return response({ ok: false, error: "Unable to create prize." }, 500);
-  }
-}
-
-export async function PATCH(request: NextRequest) {
-  try {
-    const admin = await getAuthenticatedAdmin();
-
-    if (!admin) {
-      return response({ ok: false, error: "Unauthorized." }, 401);
-    }
-
-    if (!hasLotteryPermission(admin, "lottery:prizes:manage")) {
-      return response(
-        { ok: false, error: "You do not have permission to update prizes." },
-        403,
-      );
-    }
-
-    let body: Record<string, unknown>;
-    try {
-      body = await request.json();
-    } catch {
-      return response({ ok: false, error: "The request body is not valid JSON." }, 400);
-    }
-
-    const id = String(body.id || "").trim();
-    if (!isValidUuid(id)) {
-      return response({ ok: false, error: "A valid prize ID is required." }, 400);
-    }
-
-    const db = getAuditServiceClient();
-    const { data: existing, error: lookupError } = await db
-      .from("lottery_prizes")
-      .select("*")
-      .eq("id", id)
-      .maybeSingle();
-
-    if (lookupError) {
-      return response({ ok: false, error: "Unable to load the prize." }, 500);
-    }
-
-    if (!existing) {
-      return response({ ok: false, error: "Prize not found." }, 404);
-    }
-
-    const proposed: Record<string, unknown> = {};
-
-    if ("lottery_id" in body && body.lottery_id !== existing.lottery_id) {
-      return response({ ok: false, error: "Prizes cannot be moved between lotteries." }, 409);
-    }
-    if (existing.allocated_winner_id || ["allocated", "claimed", "fulfilled", "unclaimed"].includes(existing.status)) {
-      return response({ ok: false, error: "Allocated prizes must use the controlled winner workflow." }, 409);
-    }
-
-    if ("name" in body) {
-      const name = String(body.name || "").trim();
-      if (!name) return response({ ok: false, error: "Prize name is required." }, 400);
-      proposed.name = name;
-    }
-
-    const textFields = [
-      "description",
-      "image_url",
-      "donor_name",
-      "sponsor_name",
-      "eligibility_restrictions",
-      "fulfilment_requirements",
-      "fulfilment_notes",
-    ] as const;
-
-    for (const field of textFields) {
-      if (field in body) proposed[field] = optionalText(body[field]);
-    }
-
-    if ("quantity" in body) {
-      const quantity = Number(body.quantity);
-      if (!Number.isInteger(quantity) || quantity <= 0) {
-        return response(
-          { ok: false, error: "Quantity must be a whole number above 0." },
-          400,
+      if (!hasLotteryPermission(admin, "lottery:prizes:manage")) {
+        return NextResponse.json(
+          { ok: false, error: "You do not have permission to create prizes." },
+          { status: 403 },
         );
       }
-      proposed.quantity = quantity;
-    }
 
-    if ("declared_value" in body) {
-      const declaredValue = optionalMoney(body.declared_value);
-      if (declaredValue === undefined) {
-        return response({ ok: false, error: "Declared value is invalid." }, 400);
+      for (const [index, prize] of body.prizes.entries()) {
+        const name = typeof prize?.name === "string" ? prize.name.trim() : "";
+        if (!name) {
+          return NextResponse.json({ ok: false, error: `Enter a name for prize ${index + 1}.` }, { status: 400 });
+        }
+
+        const value = prize.declared_value;
+        const declaredValue = value == null || value === "" ? null : Number(value);
+        if (declaredValue !== null && (
+          (typeof value !== "number" && typeof value !== "string") ||
+          !/^\d+(?:\.\d{1,2})?$/.test(String(value)) ||
+          !Number.isFinite(declaredValue)
+        )) {
+          return NextResponse.json({ ok: false, error: `Prize ${index + 1} has an invalid declared value.` }, { status: 400 });
+        }
+
+        prizes.push({ name, declared_value: declaredValue });
       }
-      proposed.declared_value = declaredValue;
     }
 
-    if ("is_donated" in body) proposed.is_donated = Boolean(body.is_donated);
+    const title = String(body.title || "").trim();
+    const slug = String(body.slug || "").trim().toLowerCase();
+    const lotteryType = String(
+      body.lottery_type || "small_society",
+    ).trim();
 
-    if ("display_order" in body) {
-      const displayOrder = Number(body.display_order);
-      if (!Number.isInteger(displayOrder) || displayOrder < 0) {
-        return response(
-          { ok: false, error: "Display order must be 0 or a positive whole number." },
-          400,
+    const ticketPrice = Number(body.ticket_price || 0);
+
+    if (!title) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Lottery title is required.",
+        },
+        { status: 400 },
+      );
+    }
+
+    if (!slug) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Lottery slug is required.",
+        },
+        { status: 400 },
+      );
+    }
+
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "Slug must contain lowercase letters, numbers and hyphens only.",
+        },
+        { status: 400 },
+      );
+    }
+
+    const reserved = new Set([
+      "admin",
+      "api",
+      "terms",
+      "login",
+      "checkout",
+    ]);
+
+    if (reserved.has(slug)) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "That slug is reserved.",
+        },
+        { status: 400 },
+      );
+    }
+
+    if (!Number.isFinite(ticketPrice) || ticketPrice <= 0) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Ticket price must be more than £0.",
+        },
+        { status: 400 },
+      );
+    }
+
+    /*
+     * IMPORTANT:
+     * All Burton Pride lotteries are strictly 18+.
+     *
+     * We deliberately DO NOT trust or accept minimum_age
+     * from the browser/request body.
+     *
+     * Even if someone manually changes the request and sends:
+     * minimum_age: 16
+     *
+     * this API will still save:
+     * minimum_age: 18
+     */
+    const minimumAge = REQUIRED_MINIMUM_AGE;
+
+    if (body.sales_open_at && body.sales_close_at) {
+      const open = new Date(body.sales_open_at).getTime();
+      const close = new Date(body.sales_close_at).getTime();
+
+      if (
+        !Number.isFinite(open) ||
+        !Number.isFinite(close) ||
+        close <= open
+      ) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error:
+              "Sales closing time must be after sales opening time.",
+          },
+          { status: 400 },
         );
       }
-      proposed.display_order = displayOrder;
     }
 
-    let nextStatus = String(existing.status);
-    if ("status" in body) {
-      nextStatus = String(body.status);
-      if (!ALLOWED_STATUSES.has(nextStatus)) {
-        return response({ ok: false, error: "Invalid prize status." }, 400);
+    if (body.sales_close_at && body.draw_at) {
+      const close = new Date(body.sales_close_at).getTime();
+      const draw = new Date(body.draw_at).getTime();
+
+      if (!Number.isFinite(draw) || draw < close) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error:
+              "Draw time must be on or after sales closing time.",
+          },
+          { status: 400 },
+        );
       }
-      proposed.status = nextStatus;
     }
 
-    const update = Object.fromEntries(
-      Object.entries(proposed).filter(
-        ([field, value]) => !valuesEqual(existing[field], value),
+    const maxTickets =
+      body.max_tickets === null ||
+      body.max_tickets === undefined ||
+      body.max_tickets === ""
+        ? null
+        : Number(body.max_tickets);
+
+    if (
+      maxTickets !== null &&
+      (!Number.isSafeInteger(maxTickets) || maxTickets <= 0)
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Maximum tickets must be more than 0.",
+        },
+        { status: 400 },
+      );
+    }
+
+    // Creating the draft enables paper ticketing only. The protected batch
+    // generator creates random ticket identities and updates the count later.
+    // Never reserve a sequential range or trust a browser-supplied stock count.
+    if (body.paper_tickets_enabled === true) {
+      return NextResponse.json({ ok: false, error: "Paper tickets are coming soon." }, { status: 409 });
+    }
+    const paperTicketsEnabled = false;
+
+    const maximumProceeds =
+      body.maximum_proceeds === null ||
+      body.maximum_proceeds === undefined ||
+      body.maximum_proceeds === ""
+        ? null
+        : Number(body.maximum_proceeds);
+
+    if (
+      maximumProceeds !== null &&
+      (!Number.isFinite(maximumProceeds) || maximumProceeds < 0)
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Maximum proceeds is invalid.",
+        },
+        { status: 400 },
+      );
+    }
+
+    const maximumPrizeValue =
+      body.maximum_prize_value === null ||
+      body.maximum_prize_value === undefined ||
+      body.maximum_prize_value === ""
+        ? null
+        : Number(body.maximum_prize_value);
+
+    if (
+      maximumPrizeValue !== null &&
+      (!Number.isFinite(maximumPrizeValue) ||
+        maximumPrizeValue < 0)
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Maximum prize value is invalid.",
+        },
+        { status: 400 },
+      );
+    }
+
+    const payload = {
+      name: title,
+      title,
+      slug,
+
+      internal_reference:
+        body.internal_reference || null,
+
+      lottery_type: lotteryType,
+
+      status: "draft",
+
+      short_summary:
+        body.short_summary || null,
+
+      description:
+        body.description || null,
+
+      fundraising_purpose:
+        body.fundraising_purpose || null,
+
+      publication_at:
+        body.publication_at || null,
+
+      sales_open_at:
+        body.sales_open_at || null,
+
+      sales_close_at:
+        body.sales_close_at || null,
+
+      draw_at:
+        body.draw_at || null,
+
+      results_publish_at:
+        body.results_publish_at || null,
+
+      timezone: String(
+        body.timezone || "Europe/London",
       ),
-    ) as Record<string, unknown>;
 
-    const statusChanged =
-      "status" in update && String(existing.status) !== nextStatus;
+      ticket_price: ticketPrice,
 
-    if (statusChanged) {
-      const now = new Date().toISOString();
-      if (nextStatus === "claimed") update.claimed_at = now;
-      if (nextStatus === "fulfilled") update.fulfilled_at = now;
-      if (nextStatus === "unclaimed") update.unclaimed_at = now;
-      if (nextStatus === "withdrawn") update.withdrawn_at = now;
-    }
+      currency: String(
+        body.currency || "GBP",
+      ),
 
-    if (Object.keys(update).length === 0) {
-      return response({ ok: false, error: "No prize changes were provided." }, 400);
-    }
+      max_tickets: maxTickets,
 
-    update.updated_at = new Date().toISOString();
+      paper_tickets_enabled: paperTicketsEnabled,
 
-    const { data: updated, error: updateError } = await db
-      .from("lottery_prizes")
-      .update(update)
-      .eq("id", id)
-      .select("*")
-      .single();
+      paper_ticket_start_number: null,
+      // paper_ticket_end_number is generated by PostgreSQL; omit it on insert.
+      paper_ticket_count: 0,
 
-    if (updateError) {
-      console.error("Prize update error:", updateError);
-      return response(
-        { ok: false, error: "Unable to update prize.", code: updateError.code },
-        500,
+      /*
+       * HARD-CODED AGE RESTRICTION
+       *
+       * Every Burton Pride lottery is 18+.
+       * This cannot be changed by the admin form
+       * or by a manually modified API request.
+       */
+      minimum_age: minimumAge,
+
+      promoting_society_legal_name:
+        body.promoting_society_legal_name || null,
+
+      registration_licence_type:
+        body.registration_licence_type || null,
+
+      registration_licence_number:
+        body.registration_licence_number || null,
+
+      licensing_authority:
+        body.licensing_authority || null,
+
+      responsible_promoter_name:
+        body.responsible_promoter_name || null,
+
+      responsible_promoter_address:
+        body.responsible_promoter_address || null,
+
+      geographic_eligibility:
+        body.geographic_eligibility || null,
+
+      terms_version:
+        body.terms_version || null,
+
+      privacy_notice_version:
+        body.privacy_notice_version || null,
+
+      responsible_gambling_info:
+        body.responsible_gambling_info || null,
+
+      required_ticket_wording:
+        body.required_ticket_wording || null,
+
+      maximum_proceeds: maximumProceeds,
+
+      maximum_prize_value: maximumPrizeValue,
+
+      show_in_public_directory: false,
+
+      allow_page_before_sales:
+        Boolean(body.allow_page_before_sales),
+
+      show_ticket_count:
+        Boolean(body.show_ticket_count),
+
+      show_amount_raised:
+        Boolean(body.show_amount_raised),
+
+      show_remaining_tickets:
+        Boolean(body.show_remaining_tickets),
+
+      show_prize_values:
+        body.show_prize_values !== undefined
+          ? Boolean(body.show_prize_values)
+          : true,
+
+      winner_display_mode:
+        String(
+          body.winner_display_mode || "first_name",
+        ),
+
+      countdown_enabled:
+        body.countdown_enabled !== undefined
+          ? Boolean(body.countdown_enabled)
+          : true,
+
+      compliance_approved: false,
+      compliance_approved_at: null,
+      compliance_approved_by: null,
+
+      created_by: user.id,
+
+      is_active: true,
+    };
+
+    const { data: result, error } = prizes.length
+      ? await getAuditServiceClient().rpc("create_lottery_with_prizes", {
+          lottery_data: payload,
+          prize_data: prizes,
+        })
+      : await supabase.from(TABLE).insert(payload).select("*").single();
+
+    const data = prizes.length ? result?.lottery : result;
+
+    if (error) {
+      console.error(
+        "Lottery create error:",
+        error,
+      );
+
+      if (error.code === "23505") {
+        return NextResponse.json(
+          {
+            ok: false,
+            error:
+              "That lottery slug is already in use.",
+          },
+          { status: 409 },
+        );
+      }
+
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Unable to create lottery.",
+          supabaseCode: error.code,
+          supabaseDetails: error.details,
+          supabaseHint: error.hint,
+        },
+        { status: 500 },
       );
     }
 
-    const { data: lottery } = await db
-      .from("lotteries")
-      .select("title")
-      .eq("id", updated.lottery_id)
-      .maybeSingle();
-
     await writeLotteryAuditSafe({
       admin,
-      actionCode: statusChanged
-        ? `prize.status.${nextStatus}`
-        : "prize.updated",
-      actionLabel: statusChanged
-        ? `Prize status changed to ${nextStatus}`
-        : "Prize updated",
-      actionGroup: "prize",
-      riskLevel:
-        statusChanged && ["allocated", "claimed", "fulfilled", "withdrawn"].includes(nextStatus)
-          ? "high"
-          : "medium",
-      entityType: "prize",
-      entityId: updated.id,
-      reason: statusChanged
-        ? `Prize "${updated.name}" for lottery "${lottery?.title || "Unknown lottery"}" changed from ${existing.status} to ${nextStatus}.`
-        : `Prize "${updated.name}" for lottery "${lottery?.title || "Unknown lottery"}" was updated.`,
+      actionCode: "lottery.created",
+      actionLabel: "Lottery created",
+      actionGroup: "lottery",
+      riskLevel: "medium",
+      entityType: "lottery",
+      entityId: data.id,
+      reason: paperTicketsEnabled
+        ? `Lottery "${data.title}" was created as a draft with paper ticketing enabled. No paper tickets were generated or reserved; create a paper-ticket batch separately.`
+        : `Lottery "${data.title}" was created as a draft.`,
     });
 
-    return response({ ok: true, item: updated });
+    if (prizes.length) {
+      for (const prize of result.prizes) {
+        await writeLotteryAuditSafe({
+          admin,
+          actionCode: "prize.created",
+          actionLabel: "Prize created",
+          actionGroup: "prize",
+          riskLevel: "medium",
+          entityType: "prize",
+          entityId: prize.id,
+          reason: `Prize "${prize.name}" was added to lottery "${data.title}".`,
+        });
+      }
+    }
+
+    return NextResponse.json(
+      {
+        ok: true,
+        item: data,
+      },
+      { status: 201 },
+    );
   } catch (error) {
-    console.error("Prize API PATCH error:", error);
-    return response({ ok: false, error: "Unable to update prize." }, 500);
+    console.error(
+      "Lottery API POST error:",
+      error,
+    );
+
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "Unable to create lottery.",
+      },
+      { status: 500 },
+    );
   }
 }

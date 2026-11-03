@@ -8,17 +8,6 @@ import type { ReportSheet } from "@/lib/lottery/reports/xlsx";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-/**
- * Bounded single-lottery source-record XLSX exports. Not a streaming exporter or
- * a verified regulatory return. Missing/invalid numeric data stays unavailable.
- * Archive is a defined multi-sheet record export, not a database backup.
- * No IP addresses, raw audit metadata, secrets or provider payloads are selected.
- * Export permissions must be provisioned in the server permission catalogue.
- * A prepared-export audit must persist before any workbook is returned.
- * Immutable audit DDL, persistent rate limiting, consistent snapshots and the
- * actual XLSX helper's typing/layout require separate project verification.
- */
-
 type ExportType = "entrants" | "tickets" | "orders" | "prizes" | "winners" | "audit" | "regulatory" | "archive";
 type DatasetType = Exclude<ExportType, "archive">;
 type Row = Record<string, unknown>;
