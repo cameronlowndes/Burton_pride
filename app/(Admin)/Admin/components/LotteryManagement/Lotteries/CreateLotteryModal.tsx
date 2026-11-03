@@ -53,6 +53,8 @@ type CreateLotteryModalProps = {
   testMode?: boolean;
 };
 
+const EMPTY_PRIZE = { id: 0, name: "", declaredValue: "" };
+
 const INITIAL_FORM = {
   title: "",
   slug: "",
@@ -70,7 +72,6 @@ const INITIAL_FORM = {
   ticket_price: "1.00",
   currency: "GBP",
   max_tickets: "",
-  paper_tickets_enabled: false,
   minimum_age: "18",
   promoting_society_legal_name: "Burton Pride C.I.C.",
   registration_licence_type: "",
@@ -115,10 +116,17 @@ export default function CreateLotteryModal({
   const [createError, setCreateError] = useState<string | null>(null);
   const [createForm, setCreateForm] = useState({ ...INITIAL_FORM });
 
+  const [prizes, setPrizes] = useState([EMPTY_PRIZE]);
+
+  function updatePrize(id: number, field: "name" | "declaredValue", value: string) {
+    setPrizes((rows) => rows.map((row) => row.id === id ? { ...row, [field]: value } : row));
+  }
+
   function resetCreateForm() {
     setCreateStep(1);
     setCreateError(null);
     setCreateForm({ ...INITIAL_FORM });
+    setPrizes([EMPTY_PRIZE]);
   }
 
   function finishAndClose() {
@@ -142,6 +150,7 @@ export default function CreateLotteryModal({
         setCreateStep(1);
         setCreateError(null);
         setCreateForm({ ...INITIAL_FORM });
+        setPrizes([EMPTY_PRIZE]);
         onClose();
       }
     }
@@ -234,6 +243,17 @@ export default function CreateLotteryModal({
       return;
     }
 
+    for (const [index, prize] of prizes.entries()) {
+      if (!prize.name.trim()) {
+        setCreateError(`Enter a name for prize ${index + 1}.`);
+        return;
+      }
+      if (prize.declaredValue && !/^\d+(?:\.\d{1,2})?$/.test(prize.declaredValue)) {
+        setCreateError(`Enter a valid value in pounds for prize ${index + 1}.`);
+        return;
+      }
+    }
+
     setCreating(true);
     setCreateError(null);
 
@@ -251,7 +271,7 @@ export default function CreateLotteryModal({
           ticket_price: Number(createForm.ticket_price),
           currency: createForm.currency,
           max_tickets: createForm.max_tickets ? Number(createForm.max_tickets) : null,
-          paper_tickets_enabled: createForm.paper_tickets_enabled,
+          paper_tickets_enabled: false,
           paper_ticket_count: 0,
           minimum_age: REQUIRED_MINIMUM_AGE,
           sales_open_at: createForm.sales_open_at || null,
@@ -274,10 +294,14 @@ export default function CreateLotteryModal({
 
       const payload = {
         ...createForm,
+        prizes: prizes.map((prize) => ({
+          name: prize.name.trim(),
+          declared_value: prize.declaredValue || null,
+        })),
         ticket_price: Number(createForm.ticket_price),
         minimum_age: REQUIRED_MINIMUM_AGE,
         max_tickets: createForm.max_tickets ? Number(createForm.max_tickets) : null,
-        paper_tickets_enabled: createForm.paper_tickets_enabled,
+        paper_tickets_enabled: false,
         paper_ticket_start_number: null,
         paper_ticket_count: 0,
         maximum_proceeds: createForm.maximum_proceeds ? Number(createForm.maximum_proceeds) : null,
@@ -565,7 +589,7 @@ export default function CreateLotteryModal({
 
                   <Field
                     label="Maximum total entries"
-                    hint="Optional capacity across online and sold paper tickets. This is a quantity, not the highest ticket number."
+                    hint="Optional limit on the number of tickets sold online."
                   >
                     <input
                       type="number"
@@ -577,34 +601,12 @@ export default function CreateLotteryModal({
                     />
                   </Field>
 
-                  <ToggleField
-                    label="This lottery will use paper tickets"
-                    checked={createForm.paper_tickets_enabled}
-                    onChange={(value) =>
-                      updateCreateField("paper_tickets_enabled", value)
-                    }
-                  />
-
-                  {createForm.paper_tickets_enabled ? (
-                    <div className="md:col-span-2 rounded-2xl border border-blue-400/25 bg-blue-500/10 p-4">
-                      <div className="flex items-start gap-3">
-                        <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-blue-200" />
-                        <div>
-                          <h3 className="font-extrabold text-blue-100">
-                            Generate the paper tickets after creating this draft
-                          </h3>
-                          <p className="mt-1 text-sm leading-6 text-blue-100/75">
-                            This option enables paper ticketing but does not
-                            create or reserve numbered tickets. After the lottery
-                            is created, open Paper Tickets and generate a secure
-                            print batch. The server will create random ticket
-                            numbers, UUIDs and barcode tokens and check the
-                            maximum total entry limit before creating the batch.
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  ) : null}
+                  <div className="rounded-2xl border border-blue-400/25 bg-blue-500/10 p-4 md:col-span-2">
+                    <h3 className="font-extrabold text-blue-100">Paper tickets coming soon</h3>
+                    <p className="mt-1 text-sm leading-6 text-blue-100/75">
+                      We’re still working on paper tickets. We plan to introduce them in the mid-2027 update.
+                    </p>
+                  </div>
 
                   <Field label="Minimum participant age">
                     <div className="flex min-h-12 items-center justify-between gap-3 rounded-2xl border border-emerald-400/25 bg-emerald-500/10 px-4 py-3">
@@ -806,6 +808,54 @@ export default function CreateLotteryModal({
                       <option value="none">Do not show winner identity</option>
                     </select>
                   </Field>
+
+                  <fieldset disabled={creating} className="space-y-3 md:col-span-2">
+                    <legend className="mb-2 font-bold text-white">Prizes</legend>
+                    <p className="text-sm text-white/70">Enter one prize to create the draft. Add more if needed.</p>
+                    {prizes.map((prize, index) => (
+                      <fieldset key={prize.id} className="grid gap-3 rounded-2xl border border-white/15 p-4 sm:grid-cols-2">
+                        <legend className="px-1 text-sm font-bold text-white">Prize {index + 1}</legend>
+                        <Field label="Prize name">
+                          <input
+                            value={prize.name}
+                            onChange={(event) => updatePrize(prize.id, "name", event.target.value)}
+                            className={inputClass}
+                            required
+                          />
+                        </Field>
+                        <Field label="Declared value (£, optional)">
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={prize.declaredValue}
+                            onChange={(event) => updatePrize(prize.id, "declaredValue", event.target.value)}
+                            className={inputClass}
+                          />
+                        </Field>
+                        {index > 0 && (
+                          <button
+                            type="button"
+                            className="justify-self-start rounded-xl border border-white/15 px-3 py-2 text-sm text-white hover:bg-white/10"
+                            onClick={() => setPrizes((rows) => rows.filter((row) => row.id !== prize.id))}
+                          >
+                            Remove prize {index + 1}
+                          </button>
+                        )}
+                      </fieldset>
+                    ))}
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-2 rounded-xl border border-white/15 px-4 py-2 text-sm font-bold text-white hover:bg-white/10"
+                      onClick={() => setPrizes((rows) => [
+                        ...rows,
+                        { ...EMPTY_PRIZE, id: rows[rows.length - 1].id + 1 },
+                      ])}
+                    >
+                      <Plus aria-hidden="true" className="h-4 w-4" />
+                      Add another prize
+                    </button>
+                  </fieldset>
 
                   <div className="md:col-span-2 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 p-5">
                     <div className="flex items-start gap-3">

@@ -65,11 +65,7 @@ const STATUS_OPTIONS: Array<{
     { value: "unclaimed", label: "Unclaimed" },
     { value: "withdrawn", label: "Withdrawn" },
 ];
-const PRIZE_LEVEL_OPTIONS = [
-    { value: "Bronze", label: "Bronze prize", displayOrder: 3 },
-    { value: "Silver", label: "Silver prize", displayOrder: 2 },
-    { value: "Gold", label: "Gold prize", displayOrder: 1 },
-] as const;
+const PRIZE_NAME_SUGGESTIONS = ["Gold", "Silver", "Bronze"];
 const inputClass = "w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-white/50 focus:ring-2 focus:ring-purple-300";
 const readableOptionClass = "bg-white text-slate-950";
 function statusLabel(status: PrizeStatus) {
@@ -267,6 +263,27 @@ function ModalSurface({ children, titleId, onClose, busy = false }: {
     return <dialog ref={ref} aria-labelledby={titleId} onCancel={event => { event.preventDefault(); if (!busy)
         onClose(); }} className="m-auto max-h-[90dvh] w-[calc(100%-2rem)] max-w-5xl overflow-y-auto rounded-3xl border border-white/10 bg-[#15172a] p-0 text-white shadow-2xl backdrop:bg-black/80 backdrop:backdrop-blur-sm">{children}</dialog>;
 }
+function newPrizeForm(lotteryId: string, items: PrizeRecord[]): PrizeForm {
+    return {
+        lottery_id: lotteryId,
+        name: "",
+        description: "",
+        image_url: "",
+        quantity: "1",
+        declared_value: "",
+        is_donated: false,
+        donor_name: "",
+        sponsor_name: "",
+        display_order: String(Math.max(-1, ...items
+            .filter((item) => item.lottery_id === lotteryId)
+            .map((item) => Number(item.display_order) || 0)) + 1),
+        eligibility_restrictions: "",
+        fulfilment_requirements: "",
+        fulfilment_notes: "",
+        status: "draft",
+    };
+}
+
 export default function PrizesClient() {
     const [items, setItems] = useState<PrizeRecord[]>([]);
     const [lotteryOptions, setLotteryOptions] = useState<LotteryOption[]>([]);
@@ -293,22 +310,7 @@ export default function PrizesClient() {
     const [lotteryId, setLotteryId] = useState("all");
     const [source, setSource] = useState("all");
     const [sort, setSort] = useState("display_order");
-    const [form, setForm] = useState<PrizeForm>({
-        lottery_id: "",
-        name: "",
-        description: "",
-        image_url: "",
-        quantity: "1",
-        declared_value: "",
-        is_donated: false,
-        donor_name: "",
-        sponsor_name: "",
-        display_order: "0",
-        eligibility_restrictions: "",
-        fulfilment_requirements: "",
-        fulfilment_notes: "",
-        status: "draft" as PrizeStatus,
-    });
+    const [form, setForm] = useState(() => newPrizeForm("", []));
     const loadPrizes = useCallback(async () => {
         if (busyRef.current)
             return;
@@ -420,24 +422,8 @@ export default function PrizesClient() {
             return;
         setSelected(null);
         setEditing(null);
-        setForm({
-            lottery_id: lotteryOptions.find(item => item.id === lotteryId)?.id || lotteryOptions[0]?.id || "",
-            name: "",
-            description: "",
-            image_url: "",
-            quantity: "1",
-            declared_value: "",
-            is_donated: false,
-            donor_name: "",
-            sponsor_name: "",
-            display_order: String(Math.max(0, ...items
-                .filter((item) => item.lottery_id === lotteries[0]?.id)
-                .map((item) => Number(item.display_order) || 0)) + 1),
-            eligibility_restrictions: "",
-            fulfilment_requirements: "",
-            fulfilment_notes: "",
-            status: "draft",
-        });
+        const selectedLotteryId = lotteryOptions.find(item => item.id === lotteryId)?.id || lotteryOptions[0]?.id || "";
+        setForm(newPrizeForm(selectedLotteryId, items));
         setEditorOpen(true);
         setError(null);
     }
@@ -465,7 +451,7 @@ export default function PrizesClient() {
         setEditorOpen(true);
         setError(null);
     }
-    async function persistPrize(payload: Record<string, unknown>, method: "PATCH" | "POST", expectedId?: string) {
+    async function persistPrize(payload: Record<string, unknown>, method: "PATCH" | "POST", expectedId?: string, addAnother = false) {
         if (busyRef.current || uncertain)
             return;
         busyRef.current = true;
@@ -504,7 +490,11 @@ export default function PrizesClient() {
             }
             else if (actual.allocated_winner_id)
                 throw new PrizeError("The newly created prize has an unexpected winner link.");
-            setEditorOpen(false);
+            if (addAnother) {
+                setForm(newPrizeForm(actual.lottery_id, refreshed.items!));
+            } else {
+                setEditorOpen(false);
+            }
             setEditing(null);
             setReadyPrize(null);
             setReason("");
@@ -534,7 +524,7 @@ export default function PrizesClient() {
             }
         }
     }
-    async function savePrize() {
+    async function savePrize(addAnother = false) {
         if (busyRef.current || uncertain)
             return;
         if (!form.lottery_id || (!editing && !lotteryOptions.some(item => item.id === form.lottery_id))) {
@@ -587,7 +577,7 @@ export default function PrizesClient() {
         }
         else
             body.status = "draft";
-        await persistPrize(body, editing ? "PATCH" : "POST", editing?.id);
+        await persistPrize(body, editing ? "PATCH" : "POST", editing?.id, addAnother);
     }
     function requestReady(item: PrizeRecord) {
         if (busyRef.current || loading || uncertain || !["draft", "confirmed"].includes(item.status) || item.allocated_winner_id)
@@ -696,7 +686,7 @@ export default function PrizesClient() {
         <div className="mb-4">
           <h2 className="text-lg font-bold text-white">Prize register</h2>
           <p className="mt-1 text-sm text-white/50">
-            Showing {filtered.length} of {items.length} prize records
+            Showing {filtered.length} of {items.length} prize {items.length === 1 ? "record" : "records"}
           </p>
         </div>
 
@@ -730,7 +720,7 @@ export default function PrizesClient() {
       </ModalSurface>}
       {selected ? (<PrizeDetailsModal prize={selected} onClose={() => setSelected(null)}/>) : null}
 
-      {editorOpen ? (<PrizeEditor form={form} setForm={setForm} lotteries={lotteries} editing={editing} saving={saving} blocked={uncertain} error={error} onClose={() => !saving && setEditorOpen(false)} onSave={savePrize}/>) : null}
+      {editorOpen ? (<PrizeEditor form={form} setForm={setForm} lotteries={editing ? lotteries : lotteryOptions} editing={editing} saving={saving} blocked={uncertain} error={error} onClose={() => !saving && setEditorOpen(false)} onSave={savePrize} onLotteryChange={(id) => setForm((current) => ({ ...current, lottery_id: id, display_order: newPrizeForm(id, items).display_order }))}/>) : null}
     </div>);
 }
 function StatCard({ label, value }: {
@@ -901,7 +891,7 @@ function PrizeDetailsModal({ prize, onClose, }: {
       </div>
     </ModalSurface>);
 }
-function PrizeEditor({ form, setForm, lotteries, editing, saving, blocked, error, onClose, onSave, }: {
+function PrizeEditor({ form, setForm, lotteries, editing, saving, blocked, error, onClose, onSave, onLotteryChange, }: {
     form: PrizeForm;
     setForm: React.Dispatch<React.SetStateAction<PrizeForm>>;
     lotteries: LotteryOption[];
@@ -910,7 +900,8 @@ function PrizeEditor({ form, setForm, lotteries, editing, saving, blocked, error
     blocked: boolean;
     error: string | null;
     onClose: () => void;
-    onSave: () => void;
+    onSave: (addAnother?: boolean) => void;
+    onLotteryChange: (id: string) => void;
 }) {
     return (<ModalSurface titleId="prize-editor-title" onClose={onClose} busy={saving}>
       <div className="flex max-h-[88dvh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#15172a] shadow-2xl">
@@ -933,7 +924,7 @@ function PrizeEditor({ form, setForm, lotteries, editing, saving, blocked, error
           {error && <p role="alert" className="mb-4 rounded-xl border border-amber-400/30 bg-amber-500/10 p-4 text-sm text-amber-100">{error}</p>}
           <fieldset disabled={saving || blocked} className="grid min-w-0 gap-4 border-0 p-0 md:grid-cols-2">
             <Field label="Lottery" required>
-              <select value={form.lottery_id} onChange={(e) => setForm((p: PrizeForm) => ({ ...p, lottery_id: e.target.value }))} className={`${inputClass} [&>option]:bg-white [&>option]:text-slate-950`} disabled={Boolean(editing)}>
+              <select value={form.lottery_id} onChange={(e) => onLotteryChange(e.target.value)} className={`${inputClass} [&>option]:bg-white [&>option]:text-slate-950`} disabled={Boolean(editing)}>
                 <option value="" className={readableOptionClass}>
                   Select lottery
                 </option>
@@ -943,28 +934,17 @@ function PrizeEditor({ form, setForm, lotteries, editing, saving, blocked, error
               </select>
             </Field>
 
-            <Field label="Prize level" required>
-              <select value={form.name} onChange={(e) => {
-            const level = PRIZE_LEVEL_OPTIONS.find((option) => option.value === e.target.value);
-            setForm((previous: PrizeForm) => ({
-                ...previous,
-                name: e.target.value,
-                display_order: level
-                    ? String(level.displayOrder)
-                    : previous.display_order,
-            }));
-        }} className={`${inputClass} [&>option]:bg-white [&>option]:text-slate-950`}>
-                <option value="" className={readableOptionClass}>
-                  Select prize level
-                </option>
-                {form.name && !PRIZE_LEVEL_OPTIONS.some(option => option.value === form.name) && <option value={form.name}>{form.name}</option>}
-                {PRIZE_LEVEL_OPTIONS.map((option) => (<option key={option.value} value={option.value} className={readableOptionClass}>
-                    {option.label}
-                  </option>))}
-              </select>
-              <p className="mt-2 text-xs leading-5 text-white/50">
-                Select Bronze, Silver or Gold. The display order is set automatically.
-              </p>
+            <Field label="Prize name" required>
+              <input
+                value={form.name}
+                list="prize-name-suggestions"
+                onChange={(e) => setForm((current) => ({ ...current, name: e.target.value }))}
+                className={inputClass}
+                required
+              />
+              <datalist id="prize-name-suggestions">
+                {PRIZE_NAME_SUGGESTIONS.map((name) => <option key={name} value={name}/>)}
+              </datalist>
             </Field>
 
             <Field label="Quantity" required>
@@ -1020,7 +1000,13 @@ function PrizeEditor({ form, setForm, lotteries, editing, saving, blocked, error
             Cancel
           </button>
 
-          <button type="button" onClick={onSave} disabled={saving || blocked} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-extrabold text-black hover:opacity-90 disabled:opacity-60">
+          {!editing && (
+            <button type="button" onClick={() => onSave(true)} disabled={saving || blocked} className="rounded-2xl border border-white/15 px-5 py-3 text-sm font-bold text-white hover:bg-white/10 disabled:opacity-50">
+              Save and add another
+            </button>
+          )}
+
+          <button type="button" onClick={() => onSave()} disabled={saving || blocked} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-extrabold text-black hover:opacity-90 disabled:opacity-60">
             {saving ? <Loader2 className="h-4 w-4 animate-spin"/> : <CheckCircle2 className="h-4 w-4"/>}
             {saving ? "Saving..." : editing ? "Update prize" : "Create prize"}
           </button>
