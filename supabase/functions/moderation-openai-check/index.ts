@@ -1,7 +1,16 @@
 import { timingSafeEqual } from "node:crypto";
-import { classifyComment } from "../_shared/openai-moderation.ts";
+import * as moderation from "../_shared/moderation";
+
+declare const Deno: {
+  env: {
+    get(name: string): string | undefined;
+  };
+  serve(handler: (request: Request) => Promise<Response> | Response): void;
+};
 
 const encoder = new TextEncoder();
+const classifyComment =
+  (moderation as any).classifyComment ?? (moderation as any).moderateComment;
 
 function reply(body: Record<string, unknown>, status = 200) {
   return Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
