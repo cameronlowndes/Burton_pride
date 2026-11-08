@@ -26,6 +26,7 @@ import {
   type AdminRole,
 } from "./components/providers/AdminProvider";
 import AdminSidebar from "./components/rooting/AdminSidebar";
+import NotificationBell from "./components/notifications/NotificationBell";
 
 const ALL_PERMISSION_KEYS = [
   "admin:dashboard:view",
@@ -1417,7 +1418,10 @@ function AdminLayoutGate({ children }: { children: ReactNode }) {
   }
 
   if (isMoneyRoute || isEmailRoute || isEventHubRoute) {
-    return <>{children}</>;
+    return <>
+      {adminRole === "main_admin" && <NotificationBell />}
+      {children}
+    </>;
   }
 
   const showAdminNav = Boolean(isDashboardRoute);
@@ -1456,6 +1460,7 @@ function AdminLayoutGate({ children }: { children: ReactNode }) {
             </header>
           ) : null}
 
+          {adminRole === "main_admin" && <NotificationBell />}
           <main className="min-w-0 flex-1 overflow-x-hidden px-0 py-0">
             <div className="w-full min-w-0 max-w-none">
               {children}

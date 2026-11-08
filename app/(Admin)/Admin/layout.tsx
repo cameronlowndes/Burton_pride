@@ -29,6 +29,13 @@ export const metadata: Metadata = {
     },
   },
 
+  manifest: "/admin-notifications.webmanifest",
+  icons: {
+    icon: "/image/admin-app-192.png",
+    shortcut: "/image/admin-app-192.png",
+    apple: "/image/admin-app-192.png",
+  },
+
   referrer: "no-referrer",
 };
 
