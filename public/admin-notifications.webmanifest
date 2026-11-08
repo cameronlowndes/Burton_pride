@@ -2,7 +2,7 @@
   "id": "/Admin/Notifications",
   "name": "Burton Pride Admin Portal",
   "short_name": "Burton Pride Admin",
-  "start_url": "/Admin/Notifications",
+  "start_url": "/Admin/Dashboard",
   "scope": "/Admin/",
   "display": "standalone",
   "background_color": "#050816",

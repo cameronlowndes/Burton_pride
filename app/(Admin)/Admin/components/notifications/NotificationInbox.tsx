@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { Bell, Inbox as InboxIcon, RefreshCw, ShieldCheck } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+
+import { isNotificationSource, notificationSources, type NotificationSource } from "@/lib/notifications/sources";
 import { NOTIFICATION_API, NOTIFICATIONS_CHANGED } from "./NotificationBell";
 import PhonePushSettings from "./PhonePushSettings";
 
@@ -37,7 +39,7 @@ const panel = "min-w-0 rounded-2xl border border-white/15 bg-slate-950/65";
 const moderationJobs = "/Admin/SocialMediaModeration/JobsID";
 const loadFailure = "Could not load notifications. Check your connection and try again.";
 
-export default function NotificationInbox({ initialSource }: { initialSource: "moderation" | "" }) {
+export default function NotificationInbox({ initialSource }: { initialSource: NotificationSource | "" }) {
   const [source, setSource] = useState(initialSource);
   const [unread, setUnread] = useState(false);
   const [page, setPage] = useState(1);
@@ -47,6 +49,7 @@ export default function NotificationInbox({ initialSource }: { initialSource: "m
   const [actionStatus, setActionStatus] = useState("");
   const [saving, setSaving] = useState<string | null>(null);
   const inboxTitle = useRef<HTMLHeadingElement>(null);
+  const selectedApp = source ? notificationSources[source] : null;
   const key = `${source}:${unread}:${page}:${revision}`;
 
   const current = result?.key === key ? result : null;
@@ -183,10 +186,12 @@ export default function NotificationInbox({ initialSource }: { initialSource: "m
                   Source
                   <select className={control} value={source} disabled={saving !== null} onChange={(event) => {
                     changePage(1);
-                    setSource(event.target.value === "moderation" ? "moderation" : "");
+                    setSource(isNotificationSource(event.target.value) ? event.target.value : "");
                   }}>
                     <option value="">All apps</option>
-                    <option value="moderation">Social Media Moderation</option>
+                    {Object.entries(notificationSources).map(([key, app]) => (
+                      <option key={key} value={key}>{app.label}</option>
+                    ))}
                   </select>
                 </label>
                 <label className="flex min-h-11 items-center gap-2 text-sm font-semibold text-slate-200">
@@ -229,6 +234,7 @@ export default function NotificationInbox({ initialSource }: { initialSource: "m
                   <h3 className="font-semibold">{unread ? "No unread notifications on this page" : "No notifications on this page"}</h3>
                   <p className="mt-2 text-sm text-slate-300">
                     {page > 1 ? "Go back to the previous page to see earlier results."
+                      : selectedApp && !selectedApp.connected ? `${selectedApp.label} is awaiting notification integration.`
                       : unread ? "Turn off Unread only to see alerts you’ve already read."
                       : "New moderation jobs flagged for review will appear here."}
                   </p>

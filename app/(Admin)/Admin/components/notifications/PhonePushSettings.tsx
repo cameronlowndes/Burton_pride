@@ -22,7 +22,7 @@ async function send(body: object) {
   });
   const data = await response.json().catch(() => null);
   if (!response.ok || !data) throw new Error(data?.error ?? "Could not update phone notifications.");
-  return data.result as "enabled" | "disabled" | "queued";
+  return data.result as "enabled" | "disabled" | "queued" | "sent";
 }
 
 function keyBytes(key: string) {
@@ -104,11 +104,13 @@ export default function PhonePushSettings({ buttonClass }: { buttonClass: string
       } else if (device.subscription) {
         const result = await send({ action, endpoint: device.subscription.endpoint });
         if (action === "test") {
-          if (result !== "queued") {
+          if (result === "disabled") {
             setDevice({ ...device, enabled: false });
             throw new Error("This device is no longer registered. Enable phone notifications again.");
           }
-          setStatus("Test queued. Check your phone in about a minute.");
+          setStatus(result === "sent"
+            ? "Test sent. Check your phone."
+            : "The push service is temporarily unavailable. The test will retry automatically.");
         } else {
           setDevice({ ...device, enabled: false });
           const removed = await device.subscription.unsubscribe();

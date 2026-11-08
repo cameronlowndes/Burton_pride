@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getCurrentAdmin } from "@/lib/adminPermissions";
+import { isNotificationSource } from "@/lib/notifications/sources";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 export const dynamic = "force-dynamic";
@@ -17,7 +18,7 @@ export async function GET(request: NextRequest) {
   const page = params.get("page");
   const source = params.get("source");
   if ((page !== null && !/^(?:[1-9]\d{0,2}|1000)$/.test(page)) ||
-      (source !== null && source !== "moderation")) {
+      (source !== null && !isNotificationSource(source))) {
     return response({ error: "Invalid notification filters." }, 400);
   }
 

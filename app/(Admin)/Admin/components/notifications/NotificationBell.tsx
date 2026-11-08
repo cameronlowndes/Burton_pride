@@ -54,7 +54,7 @@ export default function NotificationBell() {
   return (
     <div className="flex shrink-0 justify-end border-b border-white/10 bg-slate-950 px-4 py-1 text-white">
       <Link
-        href={`/Admin/Notifications${source}`}
+        href={`/Admin/Dashboard/Notifications${source}`}
         aria-label={`Notifications, ${unread} unread`}
         className="inline-flex min-h-11 items-center gap-2 rounded-lg px-3 text-sm font-semibold hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-purple-300"
       >

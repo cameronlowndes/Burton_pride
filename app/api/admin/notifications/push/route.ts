@@ -3,8 +3,10 @@ import { z } from "zod";
 
 import { getCurrentAdmin } from "@/lib/adminPermissions";
 import { pushConfiguration, pushEndpoint, pushSubscription } from "@/lib/notifications/push";
+import { processPushDelivery, type Delivery } from "@/lib/notifications/send-push";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const command = z.discriminatedUnion("action", [
@@ -31,6 +33,40 @@ export async function GET() {
   return reply({ available: true, publicKey: config.publicKey });
 }
 
+async function sendTest(admin: string, session: string, endpoint: string) {
+  const config = pushConfiguration();
+  if (!config) return reply({ error: "Phone notifications have not been configured on the server." }, 503);
+
+  const { data, error } = await supabaseAdmin.rpc("admin_notification_start_push_test", {
+    p_admin: admin,
+    p_session: session,
+    p_endpoint: endpoint,
+  });
+  if (error) return reply({ error: "Could not start the test notification. Try again." }, 503);
+
+  switch (data?.result) {
+    case "disabled":
+      return reply({ result: "disabled" });
+    case "forbidden":
+      return reply({ error: "Pilot access is required." }, 403);
+    case "rate_limited":
+      return reply({ error: "Wait one minute before sending another test." }, 429);
+    case "sending": {
+      const job: Delivery = data.delivery;
+      const { outcome, error: saveError } = await processPushDelivery(job, config);
+      if (saveError) {
+        return reply({ error: "Could not confirm the test status. A retry may still be scheduled." }, 503);
+      }
+      if (outcome === "accepted") return reply({ result: "sent" });
+      if (outcome === "retry") return reply({ result: "queued" }, 202);
+      if (outcome === "expired") return reply({ result: "disabled" });
+      return reply({ error: "The push service rejected the test notification." }, 502);
+    }
+    default:
+      return reply({ error: "Could not start the test notification. Try again." }, 503);
+  }
+}
+
 export async function POST(request: NextRequest) {
   if (request.headers.get("origin") !== request.nextUrl.origin ||
       !request.headers.get("content-type")?.startsWith("application/json")) {
@@ -52,7 +88,8 @@ export async function POST(request: NextRequest) {
   if (!parsed.success) return reply({ error: "This browser’s push subscription is unsupported." }, 400);
 
   const data = parsed.data;
-  if ((data.action === "enable" || data.action === "test") && !pushConfiguration()) {
+  if (data.action === "test") return sendTest(admin.id, admin.security_session_id, data.endpoint);
+  if (data.action === "enable" && !pushConfiguration()) {
     return reply({ error: "Phone notifications have not been configured on the server." }, 503);
   }
 
@@ -68,10 +105,7 @@ export async function POST(request: NextRequest) {
   switch (result) {
     case "enabled":
     case "disabled":
-    case "queued":
       return reply({ result });
-    case "rate_limited":
-      return reply({ error: "Wait one minute before sending another test." }, 429);
     case "limit":
       return reply({ error: "You have reached the five-device limit. Disable an existing device first." }, 409);
     case "forbidden":
