@@ -58,6 +58,7 @@
     "stripe": "^20.4.1",
     "uploadthing": "^7.7.4",
     "vercel": "^65.2.0",
+    "web-push": "3.6.7",
     "xlsx": "^0.18.5",
     "xlsx-js-style": "^1.2.0",
     "zod": "^4.4.3"
@@ -70,6 +71,7 @@
     "@types/nodemailer": "^6.4.17",
     "@types/react": "^19.0.12",
     "@types/react-dom": "^19.0.4",
+    "@types/web-push": "3.6.4",
     "tailwindcss": "^4.3.2",
     "typescript": "^5.8.2"
   }
