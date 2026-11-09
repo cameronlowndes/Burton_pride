@@ -51,8 +51,16 @@ export default function PhonePushSettings({ buttonClass }: { buttonClass: string
 
       try {
         const response = await fetch(endpoint, { cache: "no-store" });
-        if (!response.ok) throw new Error("Could not check phone notification access.");
-        const config = await response.json();
+        const config = await response.json().catch(() => null);
+        if (response.status === 401 || response.redirected) {
+          throw new Error("Your admin session expired. Sign in again to manage phone notifications.");
+        }
+        if (response.status === 404) {
+          throw new Error("The phone notification endpoint is missing from this deployment.");
+        }
+        if (!response.ok || !config) {
+          throw new Error(config?.error ?? `Could not load phone notification setup (HTTP ${response.status}).`);
+        }
         if (!config.available) {
           if (!cancelled) setSetupMessage("Phone push is awaiting server setup.");
           return;
@@ -157,7 +165,8 @@ export default function PhonePushSettings({ buttonClass }: { buttonClass: string
       ) : (
         <>
           <p role="status" className="mt-2 text-sm leading-relaxed text-slate-300">{setupMessage}</p>
-          {setupMessage.startsWith("Could not") && (
+          {setupMessage !== "Checking phone notification support…" &&
+            !setupMessage.startsWith("Open the portal in a browser") && (
             <button type="button" className={`mt-3 ${buttonClass}`} onClick={() => {
               setSetupMessage("Checking phone notification support…");
               setReload((value) => value + 1);

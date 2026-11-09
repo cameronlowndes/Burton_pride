@@ -1,0 +1,23 @@
+--- a/app/(Admin)/Admin/components/notifications/NotificationInbox.tsx
++++ b/app/(Admin)/Admin/components/notifications/NotificationInbox.tsx
+@@ -7,6 +7,7 @@
+ import { isNotificationSource, notificationSources, type NotificationSource } from "@/lib/notifications/sources";
+ import { NOTIFICATION_API, NOTIFICATIONS_CHANGED } from "./NotificationBell";
+ import PhonePushSettings from "./PhonePushSettings";
++import ModerationNotificationSettings from "./ModerationNotificationSettings";
+ 
+ type Alert = {
+   id: string;
+@@ -167,6 +168,12 @@
+           <dd className="mt-1 text-sm text-slate-300">Enable phone push on each device</dd>
+         </div>
+       </dl>
++
++      {source === "moderation" && showFilters && (
++        <div className="mb-6">
++          <ModerationNotificationSettings inPortal />
++        </div>
++      )}
+ 
+       <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_17rem]">
+         <section className={panel} aria-labelledby="notification-inbox-title">
