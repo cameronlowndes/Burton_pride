@@ -1,11 +1,9 @@
 import type { Metadata } from "next";
+
+import { isNotificationSource } from "@/lib/notifications/sources";
 import NotificationInbox from "../../components/notifications/NotificationInbox";
 
-export const metadata: Metadata = {
-  title: "Notifications",
-  manifest: "/admin-notifications.webmanifest",
-  icons: { apple: "/image/AdminLogo.png" },
-};
+export const metadata: Metadata = { title: "Notifications" };
 
 export default async function NotificationsPage({
   searchParams,
@@ -13,6 +11,6 @@ export default async function NotificationsPage({
   searchParams: Promise<{ source?: string | string[] }>;
 }) {
   const { source } = await searchParams;
-  const initialSource = source === "moderation" ? source : "";
-  return <NotificationInbox key={initialSource} initialSource={initialSource} />;
+  const initialSource = isNotificationSource(source) ? source : "";
+  return <NotificationInbox initialSource={initialSource} />;
 }

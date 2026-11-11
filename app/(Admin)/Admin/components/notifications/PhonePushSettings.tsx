@@ -21,7 +21,8 @@ async function send(body: object) {
     body: JSON.stringify(body),
   });
   const data = await response.json().catch(() => null);
-  if (!response.ok || !data) throw new Error(data?.error ?? "Could not update phone notifications.");
+  if (!response.ok || !data)
+    throw new Error(data?.error ?? "Could not update phone notifications.");
   return data.result as "enabled" | "disabled" | "queued" | "sent";
 }
 
@@ -30,9 +31,15 @@ function keyBytes(key: string) {
   return Uint8Array.from(atob(base64), (character) => character.charCodeAt(0));
 }
 
-export default function PhonePushSettings({ buttonClass }: { buttonClass: string }) {
+export default function PhonePushSettings({
+  buttonClass,
+}: {
+  buttonClass: string;
+}) {
   const [device, setDevice] = useState<Device | null>(null);
-  const [setupMessage, setSetupMessage] = useState("Checking phone notification support…");
+  const [setupMessage, setSetupMessage] = useState(
+    "Checking phone notification support…",
+  );
   const [reload, setReload] = useState(0);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState("");
@@ -41,11 +48,16 @@ export default function PhonePushSettings({ buttonClass }: { buttonClass: string
   useEffect(() => {
     let cancelled = false;
     async function setup() {
-      if (!window.isSecureContext || !("serviceWorker" in navigator) ||
-          !("PushManager" in window) || !("Notification" in window)) {
-        if (!cancelled) setSetupMessage(
-          "Open the portal in a browser that supports Web Push over HTTPS. On iPhone, add the portal to your Home Screen and open it from there.",
-        );
+      if (
+        !window.isSecureContext ||
+        !("serviceWorker" in navigator) ||
+        !("PushManager" in window) ||
+        !("Notification" in window)
+      ) {
+        if (!cancelled)
+          setSetupMessage(
+            "Open the portal in a browser that supports Web Push over HTTPS. On iPhone, add the portal to your Home Screen and open it from there.",
+          );
         return;
       }
 
@@ -53,37 +65,70 @@ export default function PhonePushSettings({ buttonClass }: { buttonClass: string
         const response = await fetch(endpoint, { cache: "no-store" });
         const config = await response.json().catch(() => null);
         if (response.status === 401 || response.redirected) {
-          throw new Error("Your admin session expired. Sign in again to manage phone notifications.");
+          throw new Error(
+            "Your admin session expired. Sign in again to manage phone notifications.",
+          );
         }
         if (response.status === 404) {
-          throw new Error("The phone notification endpoint is missing from this deployment.");
+          throw new Error(
+            "The phone notification endpoint is missing from this deployment.",
+          );
         }
         if (!response.ok || !config) {
-          throw new Error(config?.error ?? `Could not load phone notification setup (HTTP ${response.status}).`);
+          throw new Error(
+            config?.error ??
+              `Could not load phone notification setup (HTTP ${response.status}).`,
+          );
         }
         if (!config.available) {
-          if (!cancelled) setSetupMessage("Phone push is awaiting server setup.");
+          if (!cancelled)
+            setSetupMessage("Phone push is awaiting server setup.");
           return;
         }
         const scope = new URL(workerScope, window.location.origin).href;
         const existing = await navigator.serviceWorker.getRegistration(scope);
-        const existingWorker = existing?.active ?? existing?.waiting ?? existing?.installing;
-        if (existing?.scope === scope && existingWorker &&
-            new URL(existingWorker.scriptURL).pathname !== workerPath) {
-          throw new Error("Another service worker is already using the Notification Centre.");
+        const existingWorker =
+          existing?.active ?? existing?.waiting ?? existing?.installing;
+        if (
+          existing?.scope === scope &&
+          existingWorker &&
+          new URL(existingWorker.scriptURL).pathname !== workerPath
+        ) {
+          throw new Error(
+            "Another service worker is already using the Notification Centre.",
+          );
         }
-        const registration = await navigator.serviceWorker.register(workerPath, { scope: workerScope });
+        const registration = await navigator.serviceWorker.register(
+          workerPath,
+          { scope: workerScope },
+        );
         const subscription = await registration.pushManager.getSubscription();
         const enabled = subscription
-          ? await send({ action: "status", endpoint: subscription.endpoint }) === "enabled"
+          ? (await send({
+              action: "status",
+              endpoint: subscription.endpoint,
+            })) === "enabled"
           : false;
-        if (!cancelled) setDevice({ registration, subscription, enabled, publicKey: config.publicKey });
+        if (!cancelled)
+          setDevice({
+            registration,
+            subscription,
+            enabled,
+            publicKey: config.publicKey,
+          });
       } catch (failure) {
-        if (!cancelled) setSetupMessage(failure instanceof Error ? failure.message : "Could not set up phone notifications.");
+        if (!cancelled)
+          setSetupMessage(
+            failure instanceof Error
+              ? failure.message
+              : "Could not set up phone notifications.",
+          );
       }
     }
     void setup();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [reload]);
 
   async function update(action: "enable" | "test" | "disable") {
@@ -93,11 +138,15 @@ export default function PhonePushSettings({ buttonClass }: { buttonClass: string
     setWorking(true);
     try {
       if (action === "enable") {
-        if (await Notification.requestPermission() !== "granted") {
-          throw new Error("Allow notifications for this app in your device settings, then try again.");
+        if ((await Notification.requestPermission()) !== "granted") {
+          throw new Error(
+            "Allow notifications for this app in your device settings, then try again.",
+          );
         }
         if (!device.registration.active) {
-          throw new Error("Phone notifications are still starting. Wait a moment and try again.");
+          throw new Error(
+            "Phone notifications are still starting. Wait a moment and try again.",
+          );
         }
         if (device.subscription) await device.subscription.unsubscribe();
         const subscription = await device.registration.pushManager.subscribe({
@@ -110,25 +159,38 @@ export default function PhonePushSettings({ buttonClass }: { buttonClass: string
         setDevice({ ...device, subscription, enabled: true });
         setStatus("Phone notifications are enabled on this device.");
       } else if (device.subscription) {
-        const result = await send({ action, endpoint: device.subscription.endpoint });
+        const result = await send({
+          action,
+          endpoint: device.subscription.endpoint,
+        });
         if (action === "test") {
           if (result === "disabled") {
             setDevice({ ...device, enabled: false });
-            throw new Error("This device is no longer registered. Enable phone notifications again.");
+            throw new Error(
+              "This device is no longer registered. Enable phone notifications again.",
+            );
           }
-          setStatus(result === "sent"
-            ? "Test sent. Check your phone."
-            : "The push service is temporarily unavailable. The test will retry automatically.");
+          setStatus(
+            result === "sent"
+              ? "Test sent. Check your phone."
+              : "The push service is temporarily unavailable. The test will retry automatically.",
+          );
         } else {
           setDevice({ ...device, enabled: false });
           const removed = await device.subscription.unsubscribe();
-          const subscription = removed ? null : await device.registration.pushManager.getSubscription();
+          const subscription = removed
+            ? null
+            : await device.registration.pushManager.getSubscription();
           setDevice({ ...device, subscription, enabled: false });
           setStatus("Phone notifications are disabled on this device.");
         }
       }
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : "Could not update phone notifications.");
+      setError(
+        failure instanceof Error
+          ? failure.message
+          : "Could not update phone notifications.",
+      );
     } finally {
       setWorking(false);
     }
@@ -143,20 +205,37 @@ export default function PhonePushSettings({ buttonClass }: { buttonClass: string
       {device ? (
         <>
           <p className="mt-2 text-sm leading-relaxed text-slate-300">
-            {device.enabled ? "Enabled on this device." : "Open this page on the phone you want to use."}
+            {device.enabled
+              ? "Enabled on this device."
+              : "Open this page on the phone you want to use."}
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
             {device.enabled ? (
               <>
-                <button type="button" className={buttonClass} disabled={working} onClick={() => void update("test")}>
+                <button
+                  type="button"
+                  className={buttonClass}
+                  disabled={working}
+                  onClick={() => void update("test")}
+                >
                   Send test notification
                 </button>
-                <button type="button" className={buttonClass} disabled={working} onClick={() => void update("disable")}>
+                <button
+                  type="button"
+                  className={buttonClass}
+                  disabled={working}
+                  onClick={() => void update("disable")}
+                >
                   Disable on this device
                 </button>
               </>
             ) : (
-              <button type="button" className={buttonClass} disabled={working} onClick={() => void update("enable")}>
+              <button
+                type="button"
+                className={buttonClass}
+                disabled={working}
+                onClick={() => void update("enable")}
+              >
                 Enable phone notifications
               </button>
             )}
@@ -164,18 +243,37 @@ export default function PhonePushSettings({ buttonClass }: { buttonClass: string
         </>
       ) : (
         <>
-          <p role="status" className="mt-2 text-sm leading-relaxed text-slate-300">{setupMessage}</p>
+          <p
+            role="status"
+            className="mt-2 text-sm leading-relaxed text-slate-300"
+          >
+            {setupMessage}
+          </p>
           {setupMessage !== "Checking phone notification support…" &&
             !setupMessage.startsWith("Open the portal in a browser") && (
-            <button type="button" className={`mt-3 ${buttonClass}`} onClick={() => {
-              setSetupMessage("Checking phone notification support…");
-              setReload((value) => value + 1);
-            }}>Try again</button>
-          )}
+              <button
+                type="button"
+                className={`mt-3 ${buttonClass}`}
+                onClick={() => {
+                  setSetupMessage("Checking phone notification support…");
+                  setReload((value) => value + 1);
+                }}
+              >
+                Try again
+              </button>
+            )}
         </>
       )}
-      {status && <p role="status" className="mt-3 text-sm text-slate-200">{status}</p>}
-      {error && <p role="alert" className="mt-3 text-sm text-rose-200">{error}</p>}
+      {status && (
+        <p role="status" className="mt-3 text-sm text-slate-200">
+          {status}
+        </p>
+      )}
+      {error && (
+        <p role="alert" className="mt-3 text-sm text-rose-200">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

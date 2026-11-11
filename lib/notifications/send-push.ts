@@ -6,7 +6,8 @@ import { pushConfiguration, pushSubscription } from "@/lib/notifications/push";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 
 // Accept the CommonJS export and the newer named ESM exports.
-const webPush: typeof webPushExports = Reflect.get(webPushExports, "default") ?? webPushExports;
+const webPush: typeof webPushExports =
+  Reflect.get(webPushExports, "default") ?? webPushExports;
 
 export type Delivery = {
   delivery_id: string;
@@ -28,7 +29,12 @@ async function deliver(
   try {
     await webPush.sendNotification(
       subscription.data,
-      JSON.stringify({ id: job.delivery_id, test: job.is_test, summary: kind === "summary", kind }),
+      JSON.stringify({
+        id: job.delivery_id,
+        test: job.is_test,
+        summary: kind === "summary",
+        kind,
+      }),
       {
         vapidDetails: config,
         TTL: 600,
@@ -38,7 +44,8 @@ async function deliver(
     );
     return "accepted";
   } catch (error) {
-    const code = error instanceof webPush.WebPushError ? error.statusCode : null;
+    const code =
+      error instanceof webPush.WebPushError ? error.statusCode : null;
     if (code === 404 || code === 410) return "expired";
     if (code === null || code === 429 || code >= 500) return "retry";
     return "failed";
@@ -49,12 +56,25 @@ export async function processPushDelivery(
   job: Delivery,
   config: NonNullable<ReturnType<typeof pushConfiguration>>,
 ) {
-  const { data: state, error: stateError } = await supabaseAdmin.rpc("admin_notification_push_send_state", {
-    p_delivery: job.delivery_id,
-    p_attempt: job.attempt,
-  });
+  const { data: state, error: stateError } = await supabaseAdmin.rpc(
+    "admin_notification_push_send_state",
+    {
+      p_delivery: job.delivery_id,
+      p_attempt: job.attempt,
+    },
+  );
   if (stateError) return { outcome: "retry" as const, error: stateError };
-  if (!["send", "summary", "urgent_review", "high_review", "system_alert"].includes(state)) return { outcome: "skipped" as const, error: null };
+  if (
+    ![
+      "send",
+      "summary",
+      "urgent_review",
+      "high_review",
+      "system_alert",
+      "dashboard_alert",
+    ].includes(state)
+  )
+    return { outcome: "skipped" as const, error: null };
 
   const outcome = await deliver(job, config, state);
   const { error } = await supabaseAdmin.rpc("admin_notification_finish_push", {
