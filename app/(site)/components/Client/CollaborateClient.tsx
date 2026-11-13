@@ -75,7 +75,7 @@ export default function Collaborate() {
             <p>
               Burton Pride C.I.C is a{" "}
               <strong>fully community-led Pride organisation</strong>, created
-              by local people Simon, Isaac, Cameron, Olga and Ben who care
+              by local people Simon, Isaac, Cameron, Olga, Sarah and Stevie O'Neill who care
               deeply about Burton and the people who live here.
             </p>
 
