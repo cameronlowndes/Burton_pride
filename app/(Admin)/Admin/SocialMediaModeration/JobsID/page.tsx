@@ -1,7 +1,7 @@
 
 import type { Metadata } from "next";
 
-import JobID from "../../components/SocialMediaModeration/client/JobsID";
+import JobID from "../../components/SocialMediaModeration/JobsID/page";
 
 type Query = {
   [key: string]: string | string[] | undefined;

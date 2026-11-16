@@ -72,6 +72,12 @@ export async function processPushDelivery(
       "high_review",
       "system_alert",
       "dashboard_alert",
+      "bug_tracker_alert",
+      "email_alert",
+      "event_hub_alert",
+      "lottery_alert",
+      "money_alert",
+      "stock_alert",
     ].includes(state)
   )
     return { outcome: "skipped" as const, error: null };

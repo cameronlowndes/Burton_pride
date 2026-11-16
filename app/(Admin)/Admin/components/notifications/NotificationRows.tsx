@@ -9,6 +9,10 @@ import {
 } from "@/lib/notifications/dashboard";
 import { markNotificationRead } from "./useNotifications";
 import { DeleteNotificationButton } from "./NotificationDialogs";
+import {
+  isNotificationSource,
+  notificationSources,
+} from "@/lib/notifications/sources";
 import styles from "./notifications.module.css";
 
 const dates = new Intl.DateTimeFormat("en-GB", {
@@ -64,9 +68,9 @@ export default function NotificationRows({
             className={`${styles.row} ${!item.read_at ? styles.unread : ""}`}
           >
             <p className={styles.badge}>
-              {item.source_app === "dashboard"
-                ? "Admin Dashboard"
-                : "Social Media Moderation"}
+              {isNotificationSource(item.source_app)
+                ? notificationSources[item.source_app].label
+                : "Admin Portal"}
               {item.platform
                 ? ` · ${item.platform === "facebook" ? "Facebook" : "Instagram"}`
                 : ""}
@@ -91,7 +95,11 @@ export default function NotificationRows({
             </p>
             <div className={styles.actions}>
               <Link className={styles.button} href={itemDestination(item)}>
-                Open
+                {item.source_app === "bug_tracker"
+                  ? item.event_type === "connection_test"
+                    ? "Open Bug Tracker"
+                    : "View bug report"
+                  : "Open"}
               </Link>
               {!item.read_at && (
                 <button

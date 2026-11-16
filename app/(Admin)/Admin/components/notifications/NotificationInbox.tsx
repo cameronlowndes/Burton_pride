@@ -1,4 +1,9 @@
 "use client";
+import { stockNotificationCategories } from "@/lib/notifications/stock";
+import { moneyNotificationCategories } from "@/lib/notifications/money";
+import { lotteryNotificationCategories } from "@/lib/notifications/lottery";
+import { eventHubNotificationCategories } from "@/lib/notifications/event-hub";
+import { emailNotificationCategories } from "@/lib/notifications/email";
 import NotificationDialogs from "./NotificationDialogs";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -8,6 +13,7 @@ import {
   isNotificationSource,
   type NotificationSource,
 } from "@/lib/notifications/sources";
+import { bugNotificationCategories } from "@/lib/notifications/bug-tracker";
 import { dashboardCategories } from "@/lib/notifications/dashboard";
 import { useNotifications } from "./useNotifications";
 import {
@@ -72,9 +78,68 @@ function InboxContent({
     router.replace(`/Admin/Dashboard/Notifications?${next}`, { scroll: false });
   }
   const selected = source ? notificationSources[source] : null;
-  const canBugTracker = Boolean(
-    (access as { canBugTracker?: boolean } | null | undefined)?.canBugTracker,
-  );
+  const categoryOptions =
+    source === "stock"
+      ? stockNotificationCategories
+      : source === "money"
+        ? moneyNotificationCategories
+        : source === "lottery"
+          ? lotteryNotificationCategories
+          : source === "event_hub"
+            ? eventHubNotificationCategories
+            : source === "email"
+              ? emailNotificationCategories
+              : source === "bug_tracker"
+                ? bugNotificationCategories
+                : dashboardCategories;
+  const stockAccessMessage =
+    source === "stock" && access?.enabled
+      ? access.canStock === undefined
+        ? "Install the Stock Control notification SQL update to connect this source."
+        : !access.canStock
+          ? "Stock Control notifications are available to Main Admins only."
+          : null
+      : null;
+  const moneyAccessMessage =
+    source === "money" && access?.enabled
+      ? access.canMoney === undefined
+        ? "Install the Money Management notification SQL update to connect this source."
+        : !access.canMoney
+          ? "Money Management notifications are available to Main Admins only."
+          : null
+      : null;
+  const lotteryAccessMessage =
+    source === "lottery" && access?.enabled
+      ? access.canLottery === undefined
+        ? "Install the Lottery Management notification SQL update to connect this source."
+        : !access.canLottery
+          ? "Lottery Management notifications are available to Main Admins only."
+          : null
+      : null;
+  const eventHubAccessMessage =
+    source === "event_hub" && access?.enabled
+      ? access.canEventHub === undefined
+        ? "Install the Event Hub notification SQL update to connect this source."
+        : !access.canEventHub
+          ? "Event Hub notifications are available to Main Admins only."
+          : null
+      : null;
+  const emailAccessMessage =
+    source === "email" && access?.enabled
+      ? access.canEmail === undefined
+        ? "Install the Email Centre notification SQL update to connect this source."
+        : !access.canEmail
+          ? "Your account needs Email Centre and dashboard access."
+          : null
+      : null;
+  const bugAccessMessage =
+    source === "bug_tracker" && access?.enabled
+      ? access.canBugTracker === undefined
+        ? "Install the Bug Tracker notification SQL update to finish connecting this source."
+        : !access.canBugTracker
+          ? "Bug Tracker notifications are available to Main Admins only."
+          : null
+      : null;
   return (
     <section className={styles.page} aria-labelledby="notifications-title">
       <header className={styles.header}>
@@ -154,7 +219,13 @@ function InboxContent({
                   <option value="urgent">Urgent</option>
                 </select>
               </label>
-              {source === "dashboard" && (
+              {(source === "dashboard" ||
+                source === "bug_tracker" ||
+                source === "email" ||
+                source === "event_hub" ||
+                source === "lottery" ||
+                source === "money" ||
+                source === "stock") && (
                 <label className={styles.field}>
                   Category
                   <select
@@ -164,7 +235,7 @@ function InboxContent({
                     onChange={(e) => change({ category: e.target.value })}
                   >
                     <option value="">All categories</option>
-                    {Object.entries(dashboardCategories).map(([key, label]) => (
+                    {Object.entries(categoryOptions).map(([key, label]) => (
                       <option key={key} value={key}>
                         {label}
                       </option>
@@ -204,11 +275,23 @@ function InboxContent({
             <div className={styles.body}>
               <h3 className={styles.title}>No notifications match this view</h3>
               <p className={styles.muted}>
-                {selected && !selected.connected
-                  ? `${selected.label} is awaiting notification integration.`
-                  : unread
-                    ? "Turn off Unread only to see notifications you have already read."
-                    : "New alerts will appear here when there is activity for your account."}
+                {stockAccessMessage ||
+                moneyAccessMessage ||
+                lotteryAccessMessage ||
+                eventHubAccessMessage ||
+                emailAccessMessage ||
+                bugAccessMessage
+                  ? stockAccessMessage ||
+                    moneyAccessMessage ||
+                    lotteryAccessMessage ||
+                    eventHubAccessMessage ||
+                    emailAccessMessage ||
+                    bugAccessMessage
+                  : selected && !selected.connected
+                    ? `${selected.label} is awaiting notification integration.`
+                    : unread
+                      ? "Turn off Unread only to see notifications you have already read."
+                      : "New alerts will appear here when there is activity for your account."}
               </p>
               {(page > 1 || category || priority) && (
                 <button
@@ -251,26 +334,55 @@ function InboxContent({
               {selected?.label || "Connected sources"}
             </h2>
             <p className={styles.muted}>
-              {source === "dashboard"
-                ? "Portal announcements and account changes appear here. Reading an alert clears your unread indicator; it does not complete the related task."
-                : source === "moderation"
-                  ? "Facebook and Instagram review jobs and moderation service alerts appear here."
-                  : selected
-                    ? `${selected.label}${selected.connected ? " is connected." : " is awaiting notification integration."}`
-                    : "Admin Dashboard and Social Media Moderation share this inbox. Each administrator has their own unread state."}
+              {source === "stock"
+                ? "Stock items, low and zero-stock warnings, movements, orders, deliveries, supplier issues, locations and uploaded order documents appear here for Main Admins. Reading an alert does not adjust quantities, approve an order or create a payment."
+                : source === "money"
+                  ? "Transactions, personal-fund repayments, refunds, budgets, savings, direct debits, bank checks, imports, period locks, sponsors, suppliers and cash tin updates appear here for Main Admins. Reading an alert does not change a finance record or move money."
+                  : source === "lottery"
+                    ? "Lottery changes, paid orders, payment failures, refunds, draws, winners, prizes, integrity warnings, delivery failures and finance updates appear here for Main Admins. Reading an alert does not run a draw, issue tickets or move money."
+                    : source === "event_hub"
+                      ? "Event changes, applications, payments, documents, contacts, checklists, published terms and audit alerts appear here for Main Admins. Reading an alert does not approve or complete the related work."
+                      : source === "email"
+                        ? "New inbox messages, shared send-history updates and Gmail connection alerts appear here. Opening or reading a notification does not mark the Gmail message as read."
+                        : source === "bug_tracker"
+                          ? "Bug reports, assignments, status and priority changes, comments and internal-note alerts are available to Main Admins here."
+                          : source === "dashboard"
+                            ? "Portal announcements and account changes appear here. Reading an alert clears your unread indicator; it does not complete the related task."
+                            : source === "moderation"
+                              ? "Facebook and Instagram review jobs and moderation service alerts appear here."
+                              : selected
+                                ? `${selected.label}${selected.connected ? " is connected." : " is awaiting notification integration."}`
+                                : "Admin Dashboard, Bug Tracker, Email Centre, Event Hub, Lottery Management, Money Management, Stock Control and Social Media Moderation share this inbox. Each administrator has their own unread state."}
             </p>
             {selected?.settingsHref &&
             ((source === "dashboard" && access?.canDashboard) ||
               (source === "moderation" && access?.canModeration) ||
-              (source === "bug_tracker" && canBugTracker)) ? (
+              (source === "bug_tracker" && access?.canBugTracker) ||
+              (source === "email" && access?.canEmail) ||
+              (source === "event_hub" && access?.canEventHub) ||
+              (source === "lottery" && access?.canLottery) ||
+              (source === "money" && access?.canMoney) ||
+              (source === "stock" && access?.canStock)) ? (
               <Link className={styles.button} href={selected.settingsHref}>
                 {selected.label} settings
               </Link>
             ) : (
               <p className={styles.muted}>
-                {source
-                  ? "Notification settings are not available for this source yet."
-                  : "Choose a source to open its notification settings."}
+                {stockAccessMessage ||
+                moneyAccessMessage ||
+                lotteryAccessMessage ||
+                eventHubAccessMessage ||
+                emailAccessMessage ||
+                bugAccessMessage
+                  ? stockAccessMessage ||
+                    moneyAccessMessage ||
+                    lotteryAccessMessage ||
+                    eventHubAccessMessage ||
+                    emailAccessMessage ||
+                    bugAccessMessage
+                  : source
+                    ? "Notification settings are not available for this source yet."
+                    : "Choose a source to open its notification settings."}
               </p>
             )}
             {access?.enabled && (
@@ -281,7 +393,10 @@ function InboxContent({
             )}
           </section>
           {access?.canDashboard && (
-            <section className={`${styles.panel} ${styles.body}`}>
+            <section
+              className={`${styles.panel} ${styles.body}`}
+              hidden={source !== "" && source !== "dashboard"}
+            >
               <DashboardAnnouncement key={access.adminId} />
             </section>
           )}
@@ -291,6 +406,7 @@ function InboxContent({
         <section
           className={`${styles.panel} ${styles.body}`}
           style={{ marginTop: 24 }}
+          hidden={source !== "" && source !== "dashboard"}
           id="dashboard-notification-settings"
           tabIndex={-1}
           aria-label="Dashboard notification preferences"

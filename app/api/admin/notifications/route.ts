@@ -1,3 +1,9 @@
+import { stockNotificationCategories } from "@/lib/notifications/stock";
+import { moneyNotificationCategories } from "@/lib/notifications/money";
+import { lotteryNotificationCategories } from "@/lib/notifications/lottery";
+import { eventHubNotificationCategories } from "@/lib/notifications/event-hub";
+import { emailNotificationCategories } from "@/lib/notifications/email";
+import { bugNotificationCategories } from "@/lib/notifications/bug-tracker";
 import { isPortalOrigin } from "@/lib/notifications/request-origin";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -26,7 +32,14 @@ export async function GET(request: NextRequest) {
   const category = params.get("category");
   const priority = params.get("priority");
   if (
-    (category !== null && !Object.hasOwn(dashboardCategories, category)) ||
+    (category !== null &&
+      !Object.hasOwn(dashboardCategories, category) &&
+      !Object.hasOwn(bugNotificationCategories, category) &&
+      !Object.hasOwn(emailNotificationCategories, category) &&
+      !Object.hasOwn(eventHubNotificationCategories, category) &&
+      !Object.hasOwn(lotteryNotificationCategories, category) &&
+      !Object.hasOwn(moneyNotificationCategories, category) &&
+      !Object.hasOwn(stockNotificationCategories, category)) ||
     (priority !== null && !["routine", "action", "urgent"].includes(priority))
   )
     return response({ error: "Invalid notification filters." }, 400);

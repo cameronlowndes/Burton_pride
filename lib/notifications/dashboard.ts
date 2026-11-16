@@ -93,10 +93,39 @@ export type NotificationFeed = {
   adminId: string;
   canDashboard: boolean;
   canModeration: boolean;
+  canBugTracker?: boolean;
+  canEmail?: boolean;
+  canEventHub?: boolean;
+  canLottery?: boolean;
+  canMoney?: boolean;
+  canStock?: boolean;
 };
 export function itemTitle(item: NotificationItem) {
-  if (item.source_app === "dashboard")
-    return item.title || "Admin Dashboard update";
+  if (
+    item.source_app === "dashboard" ||
+    item.source_app === "bug_tracker" ||
+    item.source_app === "email" ||
+    item.source_app === "event_hub" ||
+    item.source_app === "lottery" ||
+    item.source_app === "money" ||
+    item.source_app === "stock"
+  )
+    return (
+      item.title ||
+      (item.source_app === "stock"
+        ? "Stock Control update"
+        : item.source_app === "money"
+          ? "Money Management update"
+          : item.source_app === "lottery"
+            ? "Lottery Management update"
+            : item.source_app === "event_hub"
+              ? "Event Hub update"
+              : item.source_app === "email"
+                ? "Email Centre update"
+                : item.source_app === "bug_tracker"
+                  ? "Bug Tracker update"
+                  : "Admin Dashboard update")
+    );
   if (item.event_type === "system_alert")
     return item.is_open
       ? "Moderation system needs attention"
@@ -109,8 +138,31 @@ export function itemTitle(item: NotificationItem) {
       : "Comment needs review";
 }
 export function itemDestination(item: NotificationItem) {
-  if (item.source_app === "dashboard")
-    return safeAdminPath(item.destination) || "/Admin/Dashboard";
+  if (
+    item.source_app === "dashboard" ||
+    item.source_app === "bug_tracker" ||
+    item.source_app === "email" ||
+    item.source_app === "event_hub" ||
+    item.source_app === "lottery" ||
+    item.source_app === "money" ||
+    item.source_app === "stock"
+  )
+    return (
+      safeAdminPath(item.destination) ||
+      (item.source_app === "stock"
+        ? "/Admin/StockManagement/Inventory"
+        : item.source_app === "money"
+          ? "/Admin/MoneyManagement/TrackingMoney"
+          : item.source_app === "lottery"
+            ? "/Admin/LotteryManagement"
+            : item.source_app === "event_hub"
+              ? "/Admin/EventHub"
+              : item.source_app === "email"
+                ? "/Admin/Email"
+                : item.source_app === "bug_tracker"
+                  ? "/Admin/BugTracker"
+                  : "/Admin/Dashboard")
+    );
   return item.job_id
     ? `/Admin/SocialMediaModeration/JobsID?job=${encodeURIComponent(item.job_id)}`
     : "/Admin/SocialMediaModeration/Connections";
