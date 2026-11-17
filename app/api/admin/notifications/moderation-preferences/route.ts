@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getCurrentAdmin } from "@/lib/adminPermissions";
+import { requireModeration, ModerationAccessError } from "@/lib/moderation/access";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 import { priorityOptions, type ModerationPreferenceUpdate } from "@/lib/notifications/moderation-preferences";
 
@@ -44,8 +44,8 @@ function reply(body: unknown, status = 200) {
   return NextResponse.json(body, { status, headers: { "Cache-Control": "private, no-store" } });
 }
 
-async function preferences(settings: ModerationPreferenceUpdate | null) {
-  const admin = await getCurrentAdmin();
+async function preferenceOperation(settings: ModerationPreferenceUpdate | null) {
+  const admin = await requireModeration();
   if (!admin?.security_session_id) return reply({ error: "Your admin session expired. Sign in again." }, 401);
 
   if (settings?.expectedAdminId && settings.expectedAdminId !== admin.id) {
@@ -64,6 +64,13 @@ async function preferences(settings: ModerationPreferenceUpdate | null) {
   return reply({ preferences: data.preferences, status: data.status, admin: data.admin });
 }
 
+async function preferences(settings: ModerationPreferenceUpdate | null) {
+  try { return await preferenceOperation(settings); }
+  catch (error) {
+    return reply({ error: error instanceof ModerationAccessError ? error.message : "Settings are temporarily unavailable." }, error instanceof ModerationAccessError ? error.status : 503);
+  }
+}
+
 export async function GET() {
   return preferences(null);
 }
@@ -76,3 +83,4 @@ export async function PUT(request: NextRequest) {
   if (!settings) return reply({ error: "Check the notification settings and try again." }, 400);
   return preferences(settings);
 }
+

@@ -20,6 +20,10 @@ const REQUIRED_PORTAL_PERMISSION = "admin:dashboard:view" as const;
 
 
 const ALL_PERMISSION_KEYS = [
+  "moderation:view",
+  "moderation:review",
+  "moderation:control",
+  "moderation:export",
   "admin:dashboard:view",
   "admin:users:manage",
 
@@ -967,3 +971,4 @@ export async function GET(): Promise<NextResponse> {
     return denied(503, "security_service_unavailable");
   }
 }
+

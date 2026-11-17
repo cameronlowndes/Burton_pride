@@ -1,9 +1,9 @@
 import "server-only";
-import { getCurrentAdmin } from "@/lib/adminPermissions";
+import { optionalModerationOperation } from "./access";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 import type { ManualSummary } from "./manual-job-input";
 export async function manualAdmin() {
-  const admin = await getCurrentAdmin();
+  const admin = await optionalModerationOperation("viewManual");
   if (!admin?.security_session_id) return null;
   const { data, error } = await supabaseAdmin.rpc("moderation_manual_access", {
     p_admin: admin.id,
@@ -49,3 +49,4 @@ export async function manualSummaries(ids: string[]) {
   }
 }
 export { supabaseAdmin as manualDb };
+

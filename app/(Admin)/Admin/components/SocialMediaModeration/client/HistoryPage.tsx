@@ -1,3 +1,4 @@
+import { requireModeration } from "@/lib/moderation/access";
 import Link from "next/link";
 import HistoryEventDialog from "../Server/HistoryEventDialog";
 import { db, evidenceAdmin, londonDate, PAGE as DOCUMENTS } from "../Server/Documents/evidence";
@@ -28,6 +29,7 @@ function outcome(event: HistoryEvent) {
 }
 
 async function loadAdminNames(events: HistoryEvent[]) {
+  await requireModeration();
   const ids = [...new Set(events.flatMap(event => event.admin_id ? [event.admin_id] : []))];
   const names = new Map<string, string>();
   if (ids.length === 0) return names;
@@ -153,7 +155,7 @@ async function EventDetails({ event, actorName }: { event: HistoryEvent; actorNa
 
 export default async function ModerationHistoryPage({ searchParams }: { searchParams: Promise<Parameters> }) {
   if (!(await evidenceAdmin())) {
-    return <main className="p-6"><h1>Moderation History</h1><p>History is restricted to main admins.</p></main>;
+    return <main className="p-6"><h1>Moderation History</h1><p>Moderation viewing permission is required.</p></main>;
   }
 
   const params = await searchParams;
@@ -294,3 +296,4 @@ export default async function ModerationHistoryPage({ searchParams }: { searchPa
     </main>
   );
 }
+

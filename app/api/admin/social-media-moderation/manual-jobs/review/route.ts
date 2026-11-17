@@ -1,3 +1,4 @@
+import { requireModerationOperation, ModerationAccessError } from "@/lib/moderation/access";
 import { NextRequest, NextResponse } from "next/server";
 import { isPortalOrigin } from "@/lib/notifications/request-origin";
 import { manualAdmin, manualDb } from "@/lib/moderation/manual-jobs-server";
@@ -15,7 +16,7 @@ export async function POST(request: NextRequest) {
   )
     return reply({ error: "Use the Admin Portal to record a review." }, 403);
   try {
-    const admin = await manualAdmin();
+    const admin = await requireModerationOperation("reviewManual");
     if (!admin)
       return reply(
         { error: "Sign in with an active Main Admin security session." },
@@ -27,7 +28,8 @@ export async function POST(request: NextRequest) {
     let value: unknown;
     try {
       value = JSON.parse(body);
-    } catch {
+    } catch (error) {
+    if (error instanceof ModerationAccessError) return reply({ error: error.message }, error.status);
       return reply({ error: "Invalid review." }, 400);
     }
     const parsed = reviewFields.safeParse(value);
@@ -79,7 +81,9 @@ export async function POST(request: NextRequest) {
         403,
       );
     return reply({ ok: true });
-  } catch {
+  } catch (error) {
+    if (error instanceof ModerationAccessError) return reply({ error: error.message }, error.status);
     return reply({ error: "Manual review is temporarily unavailable." }, 503);
   }
 }
+

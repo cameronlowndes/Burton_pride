@@ -1,3 +1,4 @@
+import { requireModerationScreen, canModerationOperation, optionalModerationOperation } from "@/lib/moderation/access";
 import { redirect } from "next/navigation";
 import { db, evidenceAdmin, imageMime, IMAGES, londonDate, MAX_IMAGE_BYTES, PAGE, readEvidence, UUID } from "./evidence";
 
@@ -6,7 +7,7 @@ export const runtime = "nodejs";
 
 async function uploadScreenshot(form: FormData) {
   "use server";
-  const actor = await evidenceAdmin();
+  const actor = await optionalModerationOperation("attachEvidence");
   if (!actor) redirect(PAGE);
   const id = form.get("job");
   if (typeof id !== "string" || !UUID.test(id)) redirect(PAGE);
@@ -18,7 +19,7 @@ async function uploadScreenshot(form: FormData) {
   if (!mime) redirect(back + "&result=invalid");
   const name = file.name.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 180) || "Screenshot";
   const { error } = await db.from(IMAGES).insert({
-    job_id: id, file_name: name, mime_type: mime, image_data: "\\x" + bytes.toString("hex"), uploaded_by: actor,
+    job_id: id, file_name: name, mime_type: mime, image_data: "\\x" + bytes.toString("hex"), uploaded_by: actor.id,
   });
   redirect(back + (error ? "&result=failed" : "&result=saved"));
 }
@@ -29,7 +30,9 @@ const button = "inline-flex min-h-11 items-center rounded-xl border border-white
 export default async function DocumentsPage({ searchParams }: {
   searchParams: Promise<{ job?: string; result?: string }>;
 }) {
-  if (!(await evidenceAdmin())) return <main className="p-6"><h1>Documents are restricted to main admins</h1></main>;
+  const viewer = await requireModerationScreen();
+  const canReview = canModerationOperation(viewer, "attachEvidence");
+  const canExport = canModerationOperation(viewer, "exportEvidence");
   const params = await searchParams;
   const selected = typeof params.job === "string" && UUID.test(params.job) ? params.job : undefined;
   const [jobs, evidence] = await Promise.all([
@@ -38,7 +41,7 @@ export default async function DocumentsPage({ searchParams }: {
     selected ? readEvidence(selected) : null,
   ]);
   if (jobs.error) throw new Error("Could not load moderation records.");
-  const download = PAGE + "/download";
+  const download = "/api/admin/social-media-moderation/download";
   return (
     <main className="w-full min-w-0 space-y-6 px-4 py-6 text-white sm:px-6">
       <header>
@@ -75,24 +78,24 @@ export default async function DocumentsPage({ searchParams }: {
             <blockquote className="mt-4 whitespace-pre-wrap break-words rounded-xl bg-slate-950/70 p-4">{evidence.job.content || "No comment text captured."}</blockquote>
             <p className="mt-4 text-sm text-slate-200">Decision {evidence.decision?.decision ?? "Pending"}</p>
             {evidence.decision?.reason && <p className="mt-1 break-words text-sm text-slate-300">{evidence.decision.reason}</p>}
-            <div className="mt-4 flex flex-wrap gap-2">
+            {canExport && <div className="mt-4 flex flex-wrap gap-2">
               <a className={button} href={download + "?job=" + evidence.job.id + "&format=txt"}>Download text</a>
               <a className={button} href={download + "?job=" + evidence.job.id + "&format=docx"}>Download Word document</a>
-            </div>
+            </div>}
             <h3 className="mt-6 border-t border-white/15 pt-5 text-lg font-semibold">Screenshots</h3>
             <p id="screenshot-help" className="mt-1 text-sm text-slate-300">Attach a PNG or JPEG up to 750 KB. Images are downloaded separately from the report.</p>
-            <form action={uploadScreenshot} className="mt-3 flex flex-wrap items-center gap-3">
+            {canReview && <form action={uploadScreenshot} className="mt-3 flex flex-wrap items-center gap-3">
               <input type="hidden" name="job" value={evidence.job.id} />
               <label htmlFor="screenshot" className="sr-only">Choose screenshot</label>
               <input id="screenshot" name="screenshot" type="file" accept=".png,.jpg,.jpeg" required aria-describedby="screenshot-help" className="max-w-full text-sm" />
               <button className={button}>Attach screenshot</button>
-            </form>
+            </form>}
             {params.result === "saved" && <p className="mt-3 text-emerald-200" role="status">Screenshot attached.</p>}
             {params.result === "invalid" && <p className="mt-3 text-amber-200" role="alert">Choose a PNG or JPEG up to 750 KB.</p>}
             {params.result === "failed" && <p className="mt-3 text-amber-200" role="alert">Screenshot could not be saved. Check the record before retrying.</p>}
             <ul className="mt-4 space-y-2">
               {evidence.images.map(image => <li key={image.id}>
-                <a className="break-all underline" href={download + "?image=" + image.id}>{image.file_name}</a>
+                {canExport ? <a className="break-all underline" href={download + "?image=" + image.id}>{image.file_name}</a> : <span>{image.file_name}</span>}
                 <span className="ml-2 text-sm text-slate-300">{londonDate.format(new Date(image.uploaded_at))}</span>
               </li>)}
             </ul>
@@ -103,3 +106,4 @@ export default async function DocumentsPage({ searchParams }: {
     </main>
   );
 }
+

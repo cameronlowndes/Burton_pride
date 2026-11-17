@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { MODERATION_ROUTES, safeNavigationHref } from "@/lib/moderation/navigation";
 import { usePathname } from "next/navigation";
 import {
   useCallback,
@@ -168,7 +169,7 @@ function getSafeHref(value: string | null | undefined) {
 
 // Used only when the Social Media Moderation menu entry has no usable link.
 // Match this path to the folder containing the moderation page in your project.
-const SOCIAL_MEDIA_MODERATION_HREF = "/Admin/Dashboard/SocialMediaModeration";
+const SOCIAL_MEDIA_MODERATION_HREF = MODERATION_ROUTES.home;
 
 function prepareSidebarItem(item: AdminSidebarItem): AdminSidebarItem {
   const labelKey = normalise(item.label)
@@ -197,19 +198,8 @@ function prepareSidebarItem(item: AdminSidebarItem): AdminSidebarItem {
     }
   }
 
-  const enabledItem: ExtendedSidebarItem = {
-    ...item,
-    href: getSafeHref(href) || SOCIAL_MEDIA_MODERATION_HREF,
-    label: item.label.replace(/\s*[-–—:(]*\s*coming soon\s*[)]?\s*$/i, "").trim(),
-    is_enabled: true,
-    disabled: false,
-    disabled_reason: null,
-    is_coming_soon: false,
-    coming_soon: false,
-  };
-
-  // Keep the saved permission fields; the existing permission filter still applies.
-  return enabledItem;
+  // Respect the saved enabled/disabled/coming-soon flags and permissions.
+  return { ...item, href: safeNavigationHref(href) || SOCIAL_MEDIA_MODERATION_HREF };
 }
 
 function formatRole(value: AdminRole | null | undefined) {

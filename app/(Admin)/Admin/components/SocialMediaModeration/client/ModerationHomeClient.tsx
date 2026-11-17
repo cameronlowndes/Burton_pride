@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { safeNavigationHref, type NavigationViewer } from "@/lib/moderation/navigation";
+import { listenForNavigationChanges } from "@/lib/moderation/navigation-events";
 import ModerationServerControl from "../Server/ModerationServerControl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, ArrowRight, Check, ExternalLink, HeartHandshake, LockKeyhole, MessageSquare, RefreshCw, Search, ShieldCheck, X } from "lucide-react";
@@ -28,12 +30,11 @@ function safeTool(value: unknown): value is Tool {
   const tool = value as Partial<Tool>;
   if (typeof tool.id !== "string" || typeof tool.label !== "string" || typeof tool.href !== "string") return false;
   if (!tool.is_enabled || tool.item_type === "group") return false;
-  if (!/^\/Admin(?:\/|$)/i.test(tool.href) || /[\\\u0000-\u0020]/.test(tool.href)) return false;
-  const url = new URL(tool.href, "https://moderation.invalid");
-  return url.origin === "https://moderation.invalid" && /^\/Admin(?:\/|$)/i.test(url.pathname);
+  return Boolean(safeNavigationHref(tool.href));
 }
 
 export default function ModerationHomeClient({ displayName, isMainAdmin, permissions }: Props) {
+  const [viewer, setViewer] = useState<NavigationViewer>({ displayName, isMainAdmin, permissionKeys: permissions, role: isMainAdmin ? "main_admin" : "admin" });
   const [tools, setTools] = useState<Tool[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -62,10 +63,12 @@ export default function ModerationHomeClient({ displayName, isMainAdmin, permiss
         throw new Error("Your session has expired. Sign in again to open your tools.");
       }
       if (!body || typeof body !== "object") throw new Error("The menu returned an invalid response. Please try again.");
-      const data = body as { ok?: boolean; error?: string; items?: unknown[] };
+      const data = body as { ok?: boolean; error?: string; items?: unknown[]; viewer?: NavigationViewer };
       if (!response.ok || !data.ok) throw new Error(data.error || "Your moderation tools could not be loaded. Please try again.");
       if (!Array.isArray(data.items)) throw new Error("The tools list is missing from the menu response. Please try again.");
       if (request.current !== controller || controller.signal.aborted) return;
+      if (!data.viewer) throw new Error("The menu account information is missing. Refresh and try again.");
+      setViewer(data.viewer);
       setTools(data.items.filter(safeTool));
       setLastLoaded(new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/London" }).format(new Date()));
     } catch (failure) {
@@ -84,9 +87,10 @@ export default function ModerationHomeClient({ displayName, isMainAdmin, permiss
     return () => { request.current?.abort("unmount"); request.current = null; };
   }, [loadTools]);
 
-  const visibleTools = useMemo(() => tools.filter((tool) =>
-    isMainAdmin || !tool.permission_key || permissions.includes(tool.permission_key)
-  ), [tools, isMainAdmin, permissions]);
+  // The server applies the same saved permissions and ancestor rules as the sidebar.
+  const visibleTools = tools;
+  useEffect(() => listenForNavigationChanges(() => { void loadTools(); }), [loadTools]);
+
   const filteredTools = useMemo(() => {
     const search = query.trim().toLocaleLowerCase("en-GB");
     return visibleTools.filter((tool) => `${tool.label} ${tool.description || ""}`.toLocaleLowerCase("en-GB").includes(search));
@@ -105,7 +109,7 @@ export default function ModerationHomeClient({ displayName, isMainAdmin, permiss
           <div className="mt-6 grid items-end gap-6 lg:grid-cols-[minmax(0,1fr)_auto]">
             <div>
               <h1 className="max-w-3xl text-3xl font-black tracking-tight sm:text-4xl xl:text-5xl">A welcoming space starts here.</h1>
-              <p className="mt-4 max-w-2xl text-base leading-7 text-slate-300">Welcome, <span className="break-words font-semibold text-white">{displayName}</span>. Open a moderation tool to help look after Burton Pride’s online community.</p>
+              <p className="mt-4 max-w-2xl text-base leading-7 text-slate-300">Welcome, <span className="break-words font-semibold text-white">{viewer.displayName}</span>. Open a moderation tool to help look after Burton Pride’s online community.</p>
             </div>
             <div className="flex w-fit items-center gap-2 rounded-xl border border-purple-300/20 bg-purple-500/10 px-4 py-3 text-sm font-semibold text-purple-100">
               <ShieldCheck className="h-5 w-5" aria-hidden="true" /> Community comes first
@@ -182,3 +186,4 @@ export default function ModerationHomeClient({ displayName, isMainAdmin, permiss
     </div>
   );
 }
+

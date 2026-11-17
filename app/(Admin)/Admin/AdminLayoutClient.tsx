@@ -29,6 +29,10 @@ import AdminSidebar from "./components/rooting/AdminSidebar";
 import NotificationBell from "./components/notifications/NotificationBell";
 
 const ALL_PERMISSION_KEYS = [
+  "moderation:view",
+  "moderation:review",
+  "moderation:control",
+  "moderation:export",
   "admin:dashboard:view",
   "admin:users:manage",
 
@@ -1507,3 +1511,4 @@ export default function AdminLayoutClient({
     </AdminProvider>
   );
 }
+

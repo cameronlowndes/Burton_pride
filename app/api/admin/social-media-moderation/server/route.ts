@@ -1,5 +1,5 @@
+import { MODERATION_OPERATIONS } from "@/lib/moderation/permissions";
 import { NextRequest } from "next/server";
-import { PATCH as checkMainAdminPassword } from "../../settings/delete-password/route";
 import {
   access,
   attempt,
@@ -11,13 +11,14 @@ import {
   hash,
   json,
   sameOrigin,
+  verifyControlPassword,
 } from "@/lib/moderation/server";
 import { effectiveStatus } from "@/supabase/functions/_shared/moderation";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export async function GET() {
   try {
-    const admin = await access("admin:dashboard:view");
+    const admin = await access("moderation:view");
     const [
       service,
       connections,
@@ -104,12 +105,12 @@ export async function GET() {
     const control = await db.rpc("moderation_authorized", {
       p_admin: admin.id,
       p_session: admin.security_session_id,
-      p_permission: "moderation:control",
+      p_permission: MODERATION_OPERATIONS.serviceControl.permission,
     });
     const review = await db.rpc("moderation_authorized", {
       p_admin: admin.id,
       p_session: admin.security_session_id,
-      p_permission: "moderation:review",
+      p_permission: MODERATION_OPERATIONS.reviewComment.permission,
     });
     const degraded =
       !!failedCount.count || !!recentRecovery.count || s.recovery_attempts > 0;
@@ -159,7 +160,7 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     sameOrigin(request);
-    const admin = await access("admin:dashboard:view");
+    const admin = await access(MODERATION_OPERATIONS.serviceControl.permission);
     const input = await body(request);
     const action = String(input.action);
     if (
@@ -193,29 +194,10 @@ export async function POST(request: NextRequest) {
       if (typeof input.password !== "string" || !input.password.trim()) {
         fail("Enter the Main Admin password.", 400);
       }
-      // Reuse the verification-only API handler in this request context.
-      // Do not call POST: that handler can also reset the password.
-      const passwordResponse = await checkMainAdminPassword(
-        new NextRequest(new URL("/api/admin/delete-password", request.url), {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-            cookie: request.headers.get("cookie") || "",
-          },
-          body: JSON.stringify({ password: input.password }),
-        }),
-      );
-      const passwordResult = await passwordResponse.json().catch(() => null);
-      if (!passwordResponse.ok || passwordResult?.ok !== true) {
-        await db
-          .from("moderation_proofs")
-          .update({ consumed_at: new Date().toISOString() })
-          .eq("proof_hash", proofHash);
+      if (!(await verifyControlPassword(input.password))) {
+        await db.from("moderation_proofs").update({ consumed_at: new Date().toISOString() }).eq("proof_hash", proofHash);
         await audit(admin, action, "password_rejected");
-        fail(
-          `${typeof passwordResult?.error === "string" ? passwordResult.error : "Main Admin password verification failed."} Start Authenticator verification again.`,
-          passwordResponse.status >= 400 ? passwordResponse.status : 502,
-        );
+        fail("Main Admin password verification failed. Start Authenticator verification again.", 403);
       }
       await audit(admin, action, "password_verified");
     }
@@ -238,3 +220,4 @@ export async function POST(request: NextRequest) {
     return errorResponse(error);
   }
 }
+

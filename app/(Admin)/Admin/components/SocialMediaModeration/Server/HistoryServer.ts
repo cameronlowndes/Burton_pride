@@ -1,3 +1,4 @@
+import { requireModeration, canModerationOperation } from "@/lib/moderation/access";
 import "server-only";
 
 import { db } from "./Documents/evidence";
@@ -78,8 +79,10 @@ export function historyLink(f: Filters, changes: Partial<Filters> = {}) {
 const select = "event_id,occurred_at,source,kind,outcome,platform,account_ref,job_id,case_ref,comment_id,actor_kind,admin_id,attempts,before_state,after_state,reason_code,related_event_key";
 
 export async function loadHistory(f: Filters) {
+  const actor = await requireModeration();
   const since = f.days === "all" ? null : new Date(Date.now() - Number(f.days) * 86400000).toISOString();
   let query = db.from("moderation_activity_feed").select(select);
+  if (!canModerationOperation(actor, "viewAudit")) query = query.neq("source", "audit");
   if (since) query = query.gte("occurred_at", since);
   if (f.tab === "admin") query = query.eq("is_admin", true);
   if (f.tab === "social") query = query.eq("is_social", true);
@@ -116,10 +119,13 @@ export async function loadHistory(f: Filters) {
 }
 
 export async function relatedHistory(event: HistoryEvent) {
+  const actor = await requireModeration();
   let query = db.from("moderation_activity_feed").select(select);
+  if (!canModerationOperation(actor, "viewAudit")) query = query.neq("source", "audit");
   if (event.case_ref) query = query.eq("case_ref", event.case_ref);
   else if (event.job_id) query = query.eq("job_id", event.job_id);
   else return null;
   return query.order("occurred_at", { ascending: false }).order("event_id", { ascending: false })
     .limit(21).returns<HistoryEvent[]>();
 }
+

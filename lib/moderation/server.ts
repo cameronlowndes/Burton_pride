@@ -2,10 +2,8 @@ import "server-only";
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient as authClient } from "@supabase/supabase-js";
-import {
-  getCurrentAdmin,
-  type AdminPermissionKey,
-} from "@/lib/adminPermissions";
+import { requireModeration, type ModerationPermission } from "./access";
+import bcrypt from "bcryptjs";
 import { supabaseAdmin as db } from "@/lib/supabase/supabaseAdmin";
 import { createClient } from "@/lib/supabase/server";
 export { db };
@@ -35,19 +33,15 @@ export function errorResponse(error: unknown) {
   );
 }
 export const hash = (s: string) => createHash("sha256").update(s).digest("hex");
-export async function access(permission: AdminPermissionKey) {
-  const admin = await getCurrentAdmin();
-  if (!admin?.security_session_id)
-    fail("Sign in again with your administrator account.", 401);
-  const { data, error } = await db.rpc("moderation_authorized", {
-    p_admin: admin.id,
-    p_session: admin.security_session_id,
-    p_permission: permission,
-  });
-  if (error) fail("Administrator permission checks are unavailable.", 503);
-  if (!data)
-    fail("An active session and moderation permission are required.", 403);
-  return admin;
+export async function access(permission: ModerationPermission) {
+  return requireModeration(permission);
+}
+export async function verifyControlPassword(password: unknown) {
+  if (typeof password !== "string" || !password || password.length > 128) fail("Enter the Main Admin password.");
+  const { data, error } = await db.from("admin_delete_settings").select("password_hash")
+    .eq("action_key", "delete_all_donations").maybeSingle();
+  if (error || !data?.password_hash) fail("The Main Admin verification password is not configured.", 503);
+  return bcrypt.compare(password, data.password_hash);
 }
 export function sameOrigin(request: NextRequest) {
   if (
@@ -219,3 +213,4 @@ export async function verifyMainPassword(password: unknown) {
   await client.auth.signOut({ scope: "local" });
   return true;
 }
+

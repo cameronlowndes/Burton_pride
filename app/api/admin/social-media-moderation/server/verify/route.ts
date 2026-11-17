@@ -1,3 +1,4 @@
+import { MODERATION_OPERATIONS } from "@/lib/moderation/permissions";
 import { NextRequest } from "next/server";
 import {
   access,
@@ -14,7 +15,7 @@ export const dynamic = "force-dynamic";
 export async function POST(request: NextRequest) {
   try {
     sameOrigin(request);
-    const admin = await access("admin:moderation:control" as any);
+    const admin = await access(MODERATION_OPERATIONS.verifyControl.permission);
     const input = await body(request);
     if (!["stop", "restart", "refresh"].includes(String(input.action)))
       fail("Invalid action.");
@@ -25,3 +26,4 @@ export async function POST(request: NextRequest) {
     return errorResponse(error);
   }
 }
+

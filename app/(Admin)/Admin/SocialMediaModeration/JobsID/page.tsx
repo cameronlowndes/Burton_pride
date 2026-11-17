@@ -1,3 +1,4 @@
+import { requireModerationScreen } from "@/lib/moderation/access";
 
 import type { Metadata } from "next";
 
@@ -26,6 +27,7 @@ export default async function JobsIDPage({
 }: {
   searchParams?: Promise<Query>;
 }) {
+  await requireModerationScreen();
   const resolvedSearchParams = ((await searchParams) ?? {}) as Query;
 
   return <JobID searchParams={Promise.resolve(resolvedSearchParams)} />;

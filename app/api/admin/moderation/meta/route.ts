@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
   if (
     !expected ||
     p.get("hub.mode") !== "subscribe" ||
-    expected.length !== supplied.length ||
+    Buffer.byteLength(expected) !== Buffer.byteLength(supplied) ||
     !timingSafeEqual(Buffer.from(expected), Buffer.from(supplied))
   )
     return new NextResponse("Forbidden", { status: 403 });
@@ -70,3 +70,4 @@ export async function POST(request: NextRequest) {
   }
   return NextResponse.json({ received: true });
 }
+

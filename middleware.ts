@@ -591,6 +591,11 @@ export async function middleware(
     normalisePath(
       request.nextUrl.pathname,
     );
+  // The route itself verifies Meta's token/HMAC over the raw request body.
+  // No other admin API is exempted from normal session/origin middleware.
+  if (pathname === "/api/admin/moderation/meta") {
+    return withSecurityHeaders(NextResponse.next(), { admin: true, noStore: true });
+  }
   if (
     isAdminRoute(pathname) ||
     isAdminApiRoute(pathname)

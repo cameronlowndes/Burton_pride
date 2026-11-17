@@ -1,4 +1,5 @@
 import Link from "next/link";
+import ModerationLogoutButton from "./ModerationLogoutButton";
 import {
   Bug,
   Lightbulb,
@@ -9,18 +10,19 @@ import {
   User,
 } from "lucide-react";
 
-import { getCurrentAdmin } from "@/lib/adminPermissions";
+import { getNavigationViewer } from "@/lib/moderation/navigation-server";
+import { MODERATION_ROUTES } from "@/lib/moderation/navigation";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export default async function SocialMediaModerationHomePage() {
-  const admin = await getCurrentAdmin();
+  const admin = await getNavigationViewer();
 
-  const userName = admin?.email || "Social media moderator";
+  const userName = admin?.displayName || "Social media moderator";
 
   return (
-    <main className="min-h-screen w-full bg-[radial-gradient(circle_at_top,_rgba(168,85,247,0.14),_transparent_30%),linear-gradient(135deg,_#020617_0%,_#0f172a_45%,_#020617_100%)] px-4 py-10 text-white sm:px-6 lg:px-8">
+    <div className="min-h-screen w-full bg-[radial-gradient(circle_at_top,_rgba(168,85,247,0.14),_transparent_30%),linear-gradient(135deg,_#020617_0%,_#0f172a_45%,_#020617_100%)] px-4 py-10 text-white sm:px-6 lg:px-8">
       <div className="mx-auto flex min-h-[70vh] w-full max-w-6xl items-center justify-center">
         <div className="w-full rounded-3xl border border-white/10 bg-white/5 px-6 py-8 text-center shadow-2xl backdrop-blur-xl sm:px-8 sm:py-10">
           <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-3xl bg-purple-500/15 text-purple-200 ring-1 ring-purple-300/20">
@@ -87,12 +89,7 @@ export default async function SocialMediaModerationHomePage() {
                   </div>
                 </div>
 
-                <Link
-                  href="/Admin/Logout"
-                  className="rounded-2xl border border-white/10 bg-white/10 px-4 py-2 text-sm font-black text-white transition hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-300"
-                >
-                  Log out
-                </Link>
+                <ModerationLogoutButton />
               </div>
 
               <div className="mt-5 rounded-3xl border border-white/10 bg-black/15 p-5">
@@ -103,6 +100,7 @@ export default async function SocialMediaModerationHomePage() {
                   />
                   Start moderating
                 </div>
+                <Link href={MODERATION_ROUTES.home} className="mt-4 inline-flex min-h-11 items-center rounded-2xl bg-white px-5 py-3 text-sm font-black text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-300">Open moderation Home</Link>
 
                 <p className="mx-auto mt-2 max-w-2xl text-sm leading-6 text-white/60">
                   Choose a tool from the Social Media Moderation sidebar
@@ -136,7 +134,7 @@ export default async function SocialMediaModerationHomePage() {
                   </Link>
 
                   <Link
-                    href="/Admin/DevelopmentRequests"
+                    href={MODERATION_ROUTES.developmentRequests}
                     className="inline-flex items-center justify-center gap-2 rounded-2xl border border-purple-300/20 bg-purple-500/15 px-5 py-3 text-sm font-black text-purple-100 transition hover:bg-purple-500/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-300"
                   >
                     <Lightbulb className="h-4 w-4" aria-hidden="true" />
@@ -157,6 +155,6 @@ export default async function SocialMediaModerationHomePage() {
           </div>
         </div>
       </div>
-    </main>
+    </div>
   );
 }

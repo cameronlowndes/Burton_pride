@@ -1,3 +1,6 @@
+import { developmentAccess } from "@/lib/development-requests/server";
+import { normalizeRequest } from "@/lib/development-requests/model";
+import { ModerationAccessError } from "@/lib/moderation/access";
 import { NextResponse } from "next/server";
 import { Resend } from "resend";
 import { createClient } from "@/lib/supabase/server";
@@ -1015,61 +1018,7 @@ async function sendDevelopmentRequestEmails(
 }
 
 async function getAuthenticatedAdmin(): Promise<AuthenticatedAdminResult> {
-  const supabase = await createClient();
-
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser();
-
-  if (authError || !user) {
-    return {
-      supabase,
-      user: null,
-      admin: null,
-      error: "Unauthorized",
-    };
-  }
-
-  const { data: admin, error: adminError } =
-    await supabase
-      .from("admin_users")
-      .select(
-        [
-          "id",
-          "email",
-          "role",
-          "is_active",
-          "is_main_admin",
-          "full_name",
-          "name",
-          "display_name",
-          "auth_user_id",
-          "supabase_user_id",
-        ].join(","),
-      )
-      .or(
-        `auth_user_id.eq.${user.id},supabase_user_id.eq.${user.id}`,
-      )
-      .eq("is_active", true)
-      .limit(1)
-      .maybeSingle<AdminUser>();
-
-  if (adminError || !admin) {
-    return {
-      supabase,
-      user,
-      admin: null,
-      error: "Admin access required",
-    };
-  }
-
-  return {
-    supabase,
-    user,
-    admin,
-    error: null,
-  };
+  return developmentAccess();
 }
 
 export async function GET() {
@@ -1127,7 +1076,7 @@ export async function GET() {
         {
           ok: false,
           error:
-            "Development requests could not be loaded.",
+            "Development requests could not be loaded. Check the Development Requests SQL update and try again.",
         },
         {
           status: 500,
@@ -1138,7 +1087,7 @@ export async function GET() {
     return NextResponse.json(
       {
         ok: true,
-        requests: data ?? [],
+        requests: (data ?? []).map((row) => normalizeRequest(row as unknown as Record<string, unknown>)),
       },
       {
         status: 200,
@@ -1148,6 +1097,7 @@ export async function GET() {
       },
     );
   } catch (error) {
+    if (error instanceof ModerationAccessError) return NextResponse.json({ ok: false, error: error.message }, { status: error.status, headers: { "Cache-Control": "no-store" } });
     console.error(
       "Development requests GET unexpected error:",
       error,
@@ -1157,7 +1107,7 @@ export async function GET() {
       {
         ok: false,
         error:
-          "Development requests could not be loaded.",
+          "Development requests could not be loaded. Check the Development Requests SQL update and try again.",
       },
       {
         status: 500,
@@ -1170,6 +1120,7 @@ export async function POST(
   request: Request,
 ) {
   try {
+    if (request.headers.get("origin") !== new URL(request.url).origin || request.headers.get("sec-fetch-site") === "cross-site") return NextResponse.json({ ok: false, error: "Use the Admin Portal to submit a request." }, { status: 403 });
     const auth =
       await getAuthenticatedAdmin();
 
@@ -1561,6 +1512,7 @@ export async function POST(
       },
     );
   } catch (error) {
+    if (error instanceof ModerationAccessError) return NextResponse.json({ ok: false, error: error.message }, { status: error.status, headers: { "Cache-Control": "no-store" } });
     console.error(
       "Development requests POST unexpected error:",
       error,
@@ -1578,3 +1530,4 @@ export async function POST(
     );
   }
 }
+

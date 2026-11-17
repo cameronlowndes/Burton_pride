@@ -1,146 +1,95 @@
 import "server-only";
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-import { getCurrentAdmin } from "@/lib/adminPermissions";
+import { supabaseAdmin as db } from "@/lib/supabase/supabaseAdmin";
+import { requireNavigationViewer, NavigationError } from "@/lib/moderation/navigation-server";
+import { NAVIGATION_COLUMNS, MenuInputError, menuFields, menuId, reorderIds } from "@/lib/moderation/navigation-input";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 export const runtime = "nodejs";
-
 const TABLE = "social_media_moderation_sidebar_items";
-const COLUMNS = "id,label,href,icon,sort_order,is_enabled,created_at";
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-class RequestError extends Error {
-  constructor(message: string, public status = 400) { super(message); }
-}
-
 function json(body: unknown, status = 200) {
   return NextResponse.json(body, { status, headers: {
-    "Cache-Control": "private, no-store, max-age=0",
-    "X-Content-Type-Options": "nosniff",
-    Vary: "Cookie, Authorization",
+    "Cache-Control": "private, no-store, max-age=0", "X-Content-Type-Options": "nosniff", Vary: "Cookie, Authorization",
   } });
 }
-
-async function database(req: NextRequest, mutation = false) {
-  const current = await getCurrentAdmin();
-  if (!current) throw new RequestError("Sign in with your admin account to manage the moderation sidebar.", 401);
-  const admin = current as unknown as Record<string, unknown>;
-  let permissions = admin.permissions;
-  if (typeof permissions === "string") {
-    try { permissions = JSON.parse(permissions); } catch { permissions = []; }
-  }
-  const canManage = admin.role === "main_admin" || admin.is_main_admin === true ||
-    (Array.isArray(permissions) && permissions.includes("site_pages:manage")) ||
-    (permissions !== null && typeof permissions === "object" &&
-      !Array.isArray(permissions) && (permissions as Record<string, unknown>)["site_pages:manage"] === true);
-  if (!canManage) throw new RequestError("You need the site_pages:manage permission or a Main Admin account to edit this menu.", 403);
-
+async function authorize(req: NextRequest, mutation = false) {
+  await requireNavigationViewer(true);
   if (mutation) {
-    if (req.headers.get("sec-fetch-site") === "cross-site") throw new RequestError("Cross-site menu changes are not allowed.", 403);
-    const origin = req.headers.get("origin");
-    if (origin && origin !== req.nextUrl.origin) throw new RequestError("The request origin does not match this website.", 403);
-  }
-  const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) throw new RequestError("The server is missing its Supabase URL or service role key configuration.", 503);
-  return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } });
-}
-
-async function readBody(req: NextRequest) {
-  const text = await req.text();
-  if (text.length > 16384) throw new RequestError("The menu item request exceeds the 16 KB limit.", 413);
-  let data: unknown;
-  try { data = JSON.parse(text); } catch { throw new RequestError("The request body must contain valid JSON."); }
-  if (!data || typeof data !== "object" || Array.isArray(data)) throw new RequestError("Provide a menu item object.");
-  return data as Record<string, unknown>;
-}
-
-function validateId(value: unknown): string {
-  if (typeof value !== "string" || !UUID.test(value)) throw new RequestError("A valid menu item ID is required.");
-  return value;
-}
-
-function validatedFields(body: Record<string, unknown>, create = false) {
-  const result: Record<string, string | number | boolean> = {};
-  for (const field of ["label", "href", "icon"] as const) {
-    if (!(field in body) && !create) continue;
-    const value = body[field];
-    if (typeof value !== "string" || !value.trim()) throw new RequestError(`Enter a non-empty ${field}.`);
-    const cleaned = value.trim();
-    if (cleaned.length > (field === "href" ? 2048 : 200)) throw new RequestError(`The ${field} is too long.`);
-    if (field === "href") {
-      if (!/^\/Admin(?:\/|$)/i.test(cleaned) || /[\\\u0000-\u0020]/.test(cleaned)) throw new RequestError("Use an internal admin path beginning with /Admin/.");
-      const parsed = new URL(cleaned, "https://sidebar.invalid");
-      if (parsed.origin !== "https://sidebar.invalid" || !/^\/Admin(?:\/|$)/i.test(parsed.pathname)) throw new RequestError("The menu URL must stay inside /Admin/.");
+    if (req.headers.get("sec-fetch-site") === "cross-site" ||
+      (req.headers.get("origin") && req.headers.get("origin") !== req.nextUrl.origin)) {
+      throw new MenuInputError("Menu changes must come from this website.", 403);
     }
-    result[field] = cleaned;
   }
-  if (create || "sort_order" in body) {
-    const value = body.sort_order ?? 0;
-    if (typeof value !== "number" || !Number.isInteger(value) || Math.abs(value) > 1000000) throw new RequestError("Sort order must be a whole number between -1000000 and 1000000.");
-    result.sort_order = value;
-  }
-  if (create || "is_enabled" in body) {
-    const value = body.is_enabled ?? true;
-    if (typeof value !== "boolean") throw new RequestError("Enabled must be true or false.");
-    result.is_enabled = value;
-  }
-  if (!Object.keys(result).length) throw new RequestError("No supported menu fields were supplied.");
-  return result;
 }
-
+async function readBody(req: NextRequest): Promise<Record<string, unknown>> {
+  if (!req.headers.get("content-type")?.toLowerCase().startsWith("application/json")) throw new MenuInputError("Send a JSON request.", 415);
+  const text = await req.text();
+  if (new TextEncoder().encode(text).length > 65536) throw new MenuInputError("The menu request exceeds 64 KB.", 413);
+  let value: unknown;
+  try { value = JSON.parse(text); } catch { throw new MenuInputError("The request must contain valid JSON."); }
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new MenuInputError("Provide a menu object.");
+  return value as Record<string, unknown>;
+}
 function failure(error: unknown) {
-  if (error instanceof RequestError) return json({ ok: false, error: error.message }, error.status);
+  if (error instanceof NavigationError || error instanceof MenuInputError) return json({ ok: false, error: error.message }, error.status);
   const reference = crypto.randomUUID();
-  console.error(`Moderation sidebar editor error ${reference}:`, error);
-  return json({ ok: false, error: "The database operation failed. Try again or contact a Main Admin.", reference }, 500);
+  console.error(`Moderation sidebar editor ${reference}`, error);
+  return json({ ok: false, error: "The menu could not be saved or loaded. Check the navigation SQL update and try again.", reference }, 503);
 }
-
 export async function GET(req: NextRequest) {
   try {
-    const db = await database(req);
-    const { data, error } = await db.from(TABLE).select(COLUMNS).eq("item_type", "link").is("parent_id", null)
-      .order("sort_order").order("id");
+    await authorize(req);
+    const { data, error } = await db.from(TABLE).select(NAVIGATION_COLUMNS).eq("item_type", "link").is("parent_id", null).order("sort_order").order("id");
     if (error) throw error;
     return json({ ok: true, items: data ?? [] });
   } catch (error) { return failure(error); }
 }
-
 export async function POST(req: NextRequest) {
   try {
-    const db = await database(req, true);
-    const body = await readBody(req);
-    const fields = validatedFields(body, true);
-    const { data, error } = await db.from(TABLE).insert({ ...fields, item_type: "link", parent_id: null })
-      .select(COLUMNS).single();
+    await authorize(req, true);
+    const fields = menuFields(await readBody(req), true);
+    const { data, error } = await db.from(TABLE).insert({ ...fields, item_type: "link", parent_id: null }).select(NAVIGATION_COLUMNS).single();
     if (error) throw error;
     return json({ ok: true, item: data }, 201);
   } catch (error) { return failure(error); }
 }
-
 export async function PATCH(req: NextRequest) {
   try {
-    const db = await database(req, true);
+    await authorize(req, true);
     const body = await readBody(req);
-    const id = validateId(body.id);
-    const fields = validatedFields(body);
+    const id = menuId(body.id);
+    const fields = menuFields(body);
     const { data, error } = await db.from(TABLE).update({ ...fields, updated_at: new Date().toISOString() })
-      .eq("id", id).eq("item_type", "link").is("parent_id", null).select(COLUMNS).maybeSingle();
+      .eq("id", id).eq("item_type", "link").is("parent_id", null).select(NAVIGATION_COLUMNS).maybeSingle();
     if (error) throw error;
-    if (!data) throw new RequestError("This menu item no longer exists. Refresh the list before editing it.", 404);
+    if (!data) throw new MenuInputError("This link no longer exists. Refresh the menu.", 404);
     return json({ ok: true, item: data });
   } catch (error) { return failure(error); }
 }
-
+/** One RPC transaction, including a stale-order check. Never issue per-row PATCH requests. */
+export async function PUT(req: NextRequest) {
+  try {
+    await authorize(req, true);
+    const body = await readBody(req);
+    const orderedIds = reorderIds(body.orderedIds);
+    const expectedOrder = reorderIds(body.expectedOrder);
+    if (orderedIds.length !== expectedOrder.length || orderedIds.some((id) => !expectedOrder.includes(id))) {
+      throw new MenuInputError("The new order must contain every current menu link exactly once.");
+    }
+    const { error } = await db.rpc("reorder_moderation_sidebar", { p_ordered_ids: orderedIds, p_expected_order: expectedOrder });
+    if (error?.code === "40001") throw new MenuInputError("Another admin changed the menu order. Refresh and try again.", 409);
+    if (error?.code === "22023") throw new MenuInputError("The menu changed or the order is invalid. Refresh and try again.", 409);
+    if (error) throw error;
+    return json({ ok: true });
+  } catch (error) { return failure(error); }
+}
 export async function DELETE(req: NextRequest) {
   try {
-    const db = await database(req, true);
-    const id = validateId(req.nextUrl.searchParams.get("id"));
-    const { data, error } = await db.from(TABLE).delete().eq("id", id).eq("item_type", "link").is("parent_id", null)
-      .select(COLUMNS).maybeSingle();
+    await authorize(req, true);
+    const id = menuId(req.nextUrl.searchParams.get("id"));
+    const { data, error } = await db.from(TABLE).delete().eq("id", id).eq("item_type", "link").is("parent_id", null).select("id").maybeSingle();
     if (error) throw error;
-    return json({ ok: true, deletedId: id, deleted: data, already_deleted: !data });
+    return json({ ok: true, deletedId: id, already_deleted: !data });
   } catch (error) { return failure(error); }
 }

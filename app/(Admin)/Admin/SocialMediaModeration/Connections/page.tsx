@@ -1,3 +1,4 @@
+import { requireModerationScreen } from "@/lib/moderation/access";
 
 import type { Metadata } from "next";
 
@@ -17,6 +18,7 @@ export const metadata: Metadata = {
   },
 };
 
-export default function SocialMediaModerationConnectionsPage() {
+export default async function SocialMediaModerationConnectionsPage() {
+  await requireModerationScreen();
   return <SocialMediaModerationConnections />;
 }

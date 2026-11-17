@@ -1,3 +1,4 @@
+import { requireModerationScreen } from "@/lib/moderation/access";
 
 import type { Metadata } from "next";
 
@@ -22,5 +23,6 @@ export default async function DocumentServerPageServer({
 }: {
   searchParams: Promise<{ job?: string; result?: string }>;
 }) {
+  await requireModerationScreen();
   return <DocumentServerPage searchParams={searchParams} />;
 }

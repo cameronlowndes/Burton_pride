@@ -1,3 +1,4 @@
+import { requireModerationScreen } from "@/lib/moderation/access";
 
 import type { Metadata } from "next";
 
@@ -25,5 +26,6 @@ export default async function TermsPageClient({
     result?: string;
   }>;
 }) {
+  await requireModerationScreen();
   return <TermsPage searchParams={searchParams} />;
 }

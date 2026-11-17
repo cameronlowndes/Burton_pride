@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { requireSecureAdmin, ModerationAccessError } from "@/lib/moderation/access";
 import { NextResponse } from "next/server";
 
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
@@ -6,19 +6,7 @@ import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const ADMIN_ID_COOKIE = "burton_admin_id";
-const ADMIN_EMAIL_COOKIE = "burton_admin_email";
-const SESSION_COOKIE = "burton_admin_session";
-
 const ADMIN_USERS_TABLE = "admin_users";
-
-const MAIN_ADMIN_EMAILS = [
-  "cameronlowndes@burtonpride.co.uk",
-  "cameronlowndes@gmail.com",
-  "simonwhale@burtonpride.co.uk",
-  "isaactimmins@burtonpride.co.uk",
-  "olga@burtonpride.co.uk",
-].map((email) => email.toLowerCase());
 
 type AdminRole = "main_admin" | "admin" | "editor";
 type TwoFactorMethod = "email" | "totp";
@@ -67,6 +55,10 @@ const VALID_TWO_FACTOR_METHODS: TwoFactorMethod[] = [
  * Keep this list in sync with AdminUsersClient_AllPortalFeatures.tsx.
  */
 const ALL_PERMISSION_KEYS = [
+  "moderation:view",
+  "moderation:review",
+  "moderation:control",
+  "moderation:export",
   /*
    * Admin Portal
    */
@@ -478,18 +470,11 @@ function hasPermissionValue(
   return false;
 }
 
-function isMainAdminEmail(email: unknown) {
-  return MAIN_ADMIN_EMAILS.includes(
-    String(email || "")
-      .trim()
-      .toLowerCase(),
-  );
-}
-
 function getSafeStatus(error: unknown) {
   if (!(error instanceof Error)) return 500;
 
   if (error.message === "AUTH_REQUIRED") return 401;
+  if (error.message === "SECURITY_UNAVAILABLE") return 503;
   if (error.message === "ACCESS_DENIED") return 403;
 
   return 500;
@@ -500,6 +485,7 @@ function getSafeMessage(error: unknown) {
     return "The request could not be completed.";
   }
 
+  if (error.message === "SECURITY_UNAVAILABLE") return "Secure account checks are unavailable. Try again shortly.";
   if (error.message === "AUTH_REQUIRED") {
     return "Your secure admin session has expired. Please sign in again.";
   }
@@ -512,61 +498,15 @@ function getSafeMessage(error: unknown) {
 }
 
 async function requireCurrentAdminManager(): Promise<CurrentAdmin> {
-  const cookieStore = await cookies();
-
-  const adminId =
-    cookieStore.get(ADMIN_ID_COOKIE)?.value || "";
-  const adminEmail =
-    cookieStore.get(ADMIN_EMAIL_COOKIE)?.value || "";
-  const sessionToken =
-    cookieStore.get(SESSION_COOKIE)?.value || "";
-
-  if (!adminId || !adminEmail || !sessionToken) {
+  let actor;
+  try { actor = await requireSecureAdmin(); }
+  catch (error) {
+    if (error instanceof ModerationAccessError && error.status === 503) throw new Error("SECURITY_UNAVAILABLE");
+    if (error instanceof ModerationAccessError && error.status === 403) throw new Error("ACCESS_DENIED");
     throw new Error("AUTH_REQUIRED");
   }
-
-  const { data: admin, error } = await supabaseAdmin
-    .from(ADMIN_USERS_TABLE)
-    .select(
-      "id,email,role,is_active,permissions",
-    )
-    .eq("id", adminId)
-    .eq("email", adminEmail)
-    .eq("is_active", true)
-    .maybeSingle();
-
-  if (error) {
-    console.error(
-      "requireCurrentAdminManager database error:",
-      error,
-    );
-
-    throw new Error("ACCESS_DENIED");
-  }
-
-  if (!admin) {
-    throw new Error("AUTH_REQUIRED");
-  }
-
-  const allowed =
-    admin.role === "main_admin" ||
-    isMainAdminEmail(admin.email || adminEmail) ||
-    hasPermissionValue(
-      admin.permissions,
-      "admin:users:manage",
-    );
-
-  if (!allowed) {
-    throw new Error("ACCESS_DENIED");
-  }
-
-  return {
-    id: String(admin.id),
-    email: admin.email,
-    role: cleanRole(admin.role),
-    is_active: admin.is_active === true,
-    permissions: admin.permissions,
-  };
+  if (actor.role !== "main_admin" && !actor.permissionKeys.includes("admin:users:manage")) throw new Error("ACCESS_DENIED");
+  return { id: actor.id, email: null, role: actor.role, is_active: true, permissions: actor.permissionKeys };
 }
 
 async function findSupabaseUserByEmail(
@@ -1149,3 +1089,4 @@ export async function PATCH(request: Request) {
     );
   }
 }
+

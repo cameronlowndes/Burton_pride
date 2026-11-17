@@ -7,7 +7,8 @@ import { bugNotificationCategories } from "@/lib/notifications/bug-tracker";
 import { isPortalOrigin } from "@/lib/notifications/request-origin";
 import { NextRequest, NextResponse } from "next/server";
 
-import { getCurrentAdmin } from "@/lib/adminPermissions";
+import { requireSecureAdmin, moderationCan, ModerationAccessError } from "@/lib/moderation/access";
+import { filterModerationFeed } from "@/lib/moderation/notification-access";
 import { dashboardCategories } from "@/lib/notifications/dashboard";
 import { isNotificationSource } from "@/lib/notifications/sources";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
@@ -21,14 +22,16 @@ function response(body: unknown, status = 200) {
   });
 }
 
-export async function GET(request: NextRequest) {
-  const admin = await getCurrentAdmin();
+async function readFeed(request: NextRequest) {
+  const admin = await requireSecureAdmin();
   if (!admin?.security_session_id)
     return response({ error: "Sign in again." }, 401);
 
   const params = request.nextUrl.searchParams;
   const page = params.get("page");
   const source = params.get("source");
+  const canModeration = moderationCan(admin, "moderation:view");
+  if (source === "moderation" && !canModeration) return response({ error: "Moderation viewing permission is required." }, 403);
   const category = params.get("category");
   const priority = params.get("priority");
   if (
@@ -64,10 +67,10 @@ export async function GET(request: NextRequest) {
       { error: "Notifications are temporarily unavailable." },
       503,
     );
-  return response(data);
+  return response(filterModerationFeed(data, canModeration));
 }
 
-export async function POST(request: NextRequest) {
+async function markRead(request: NextRequest) {
   if (!isPortalOrigin(request)) {
     return response(
       { error: "This request must come from the Admin Portal." },
@@ -80,7 +83,7 @@ export async function POST(request: NextRequest) {
     return response({ error: "Invalid notification ID." }, 400);
   }
 
-  const admin = await getCurrentAdmin();
+  const admin = await requireSecureAdmin();
   if (!admin?.security_session_id)
     return response({ error: "Sign in again." }, 401);
 
@@ -112,3 +115,11 @@ export async function POST(request: NextRequest) {
   if (!data) return response({ error: "Notification unavailable." }, 404);
   return response({ ok: true });
 }
+
+
+async function safely(operation: () => Promise<NextResponse>) {
+  try { return await operation(); }
+  catch (error) { return response({ error: error instanceof ModerationAccessError ? error.message : "Notifications are temporarily unavailable." }, error instanceof ModerationAccessError ? error.status : 503); }
+}
+export async function GET(request: NextRequest) { return safely(() => readFeed(request)); }
+export async function POST(request: NextRequest) { return safely(() => markRead(request)); }

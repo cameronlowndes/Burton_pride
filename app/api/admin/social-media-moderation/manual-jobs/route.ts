@@ -1,3 +1,4 @@
+import { requireModerationOperation, ModerationAccessError } from "@/lib/moderation/access";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { isPortalOrigin } from "@/lib/notifications/request-origin";
@@ -12,14 +13,15 @@ const reply = (body: unknown, status = 200) =>
   });
 export async function GET() {
   try {
-    const admin = await manualAdmin();
+    const admin = await requireModerationOperation("createManual");
     return admin
       ? reply({ adminId: admin.id })
       : reply(
           { error: "Sign in with an active Main Admin security session." },
           403,
         );
-  } catch {
+  } catch (error) {
+    if (error instanceof ModerationAccessError) return reply({ error: error.message }, error.status);
     return reply(
       {
         error:
@@ -39,7 +41,7 @@ export async function POST(request: NextRequest) {
       403,
     );
   try {
-    const admin = await manualAdmin();
+    const admin = await requireModerationOperation("createManual");
     if (!admin)
       return reply(
         { error: "Sign in with an active Main Admin security session." },
@@ -51,7 +53,8 @@ export async function POST(request: NextRequest) {
     let value: unknown;
     try {
       value = JSON.parse(body);
-    } catch {
+    } catch (error) {
+    if (error instanceof ModerationAccessError) return reply({ error: error.message }, error.status);
       return reply({ error: "Invalid report." }, 400);
     }
     const envelope = z
@@ -143,7 +146,8 @@ export async function POST(request: NextRequest) {
       },
       data.replayed ? 200 : 201,
     );
-  } catch {
+  } catch (error) {
+    if (error instanceof ModerationAccessError) return reply({ error: error.message }, error.status);
     return reply(
       {
         error:
@@ -153,3 +157,4 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+

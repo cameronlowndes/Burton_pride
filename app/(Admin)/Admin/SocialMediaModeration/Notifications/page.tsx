@@ -1,3 +1,4 @@
+import { requireModerationScreen } from "@/lib/moderation/access";
 import type { Metadata } from "next";
 import ModerationNotificationSettings from "../../components/SocialMediaModeration/client/ModerationNotificationSettings";
 
@@ -6,7 +7,8 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-export default function ModerationNotificationsPage() {
+export default async function ModerationNotificationsPage() {
+  await requireModerationScreen();
   return (
     <section className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6 sm:py-12">
       <p className="text-sm font-semibold text-purple-200">Social Media Moderation</p>
@@ -20,3 +22,4 @@ export default function ModerationNotificationsPage() {
     </section>
   );
 }
+

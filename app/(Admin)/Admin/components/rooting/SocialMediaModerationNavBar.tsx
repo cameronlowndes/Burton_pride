@@ -1,8 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import { safeNavigationHref, type NavigationViewer } from "@/lib/moderation/navigation";
+import { listenForNavigationChanges } from "@/lib/moderation/navigation-events";
 import { usePathname } from "next/navigation";
 import {
+  createContext,
+  useContext,
   useCallback,
   useEffect,
   useMemo,
@@ -72,6 +76,7 @@ import type {
 } from "@/types/admin-sidebar";
 
 type AdminRole = "main_admin" | "admin" | "editor";
+const ViewerContext = createContext<NavigationViewer | null>(null);
 
 type SocialMediaModerationSidebarProps = {
   children?: ReactNode;
@@ -150,22 +155,8 @@ function cleanPath(value: string | null | undefined) {
   return (cleaned || "/").toLowerCase();
 }
 
-function isSafeAdminHref(value: string | null | undefined) {
-  const href = String(value || "").trim();
-
-  if (!href || href === "#") return false;
-  if (!href.startsWith("/")) return false;
-  if (href.startsWith("//")) return false;
-  if (href.includes("\\\\\\\\")) return false;
-
-  const lower = href.toLowerCase();
-
-  return lower === "/" || lower.startsWith("/admin");
-}
-
 function getSafeHref(value: string | null | undefined) {
-  const href = String(value || "").trim();
-  return isSafeAdminHref(href) ? href : "";
+  return safeNavigationHref(value);
 }
 
 function formatRole(value: AdminRole | null | undefined) {
@@ -175,127 +166,6 @@ function formatRole(value: AdminRole | null | undefined) {
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
-}
-
-function hasPermission(
-  permissions: string[],
-  adminRole: AdminRole | null | undefined,
-  permission: string
-) {
-  if (adminRole === "main_admin") return true;
-  return permissions.includes(permission);
-}
-
-function getItemPermission(item: AdminSidebarItem): string | null {
-  const unsafeItem = item as ExtendedSidebarItem;
-
-  const savedPermission =
-    unsafeItem.permission_key ||
-    unsafeItem.required_permission ||
-    unsafeItem.permission;
-
-  if (savedPermission) return savedPermission;
-
-  const label = normalise(item.label);
-  const href = normalise(item.href);
-
-  if (
-    label.includes("delete all password") ||
-    label.includes("delete password") ||
-    href.includes("delete-password") ||
-    href.includes("deletepassword")
-  ) {
-    return "money:delete_all";
-  }
-
-  if (
-    label === "users" ||
-    label.includes("admin users") ||
-    label.includes("permissions") ||
-    href.includes("/admin/dashboard/users") ||
-    href.includes("/admin/users")
-  ) {
-    return "admin:users:manage";
-  }
-
-  if (
-    label.includes("money") ||
-    label.includes("accounts") ||
-    label.includes("cash") ||
-    label.includes("supplier") ||
-    href.includes("/admin/moneymanagement") ||
-    href.includes("/admin/money") ||
-    href.includes("/admin/dashboard/money")
-  ) {
-    return "money:view";
-  }
-
-  if (
-    label.includes("audit") ||
-    label.includes("logs") ||
-    href.includes("/logs") ||
-    href.includes("audit")
-  ) {
-    return "audit_logs:view";
-  }
-
-  if (label.includes("event hub") || href.includes("burtonprideeventhub")) {
-    return "event_hub:view";
-  }
-
-  if (label.includes("email") || href.includes("/admin/email")) {
-    return "email:view";
-  }
-
-  if (label.includes("contact") || href.includes("contact")) {
-    return "contacts:view";
-  }
-
-  if (label.includes("donation") || href.includes("donation")) {
-    return "donations:view";
-  }
-
-  if (label.includes("raffle") || href.includes("raffle")) {
-    return "raffle:view";
-  }
-
-  if (
-    label.includes("bug tracker") ||
-    label.includes("report bug") ||
-    href.includes("/admin/bugtracker") ||
-    href.includes("/admin/bug-tracker")
-  ) {
-    return "admin:dashboard:view";
-  }
-
-  if (
-    label.includes("page editor") ||
-    label.includes("navbar") ||
-    label.includes("side bar") ||
-    label.includes("sidebar") ||
-    href.includes("/pageeditor")
-  ) {
-    return "site_pages:manage";
-  }
-
-  if (label.includes("dashboard") || href.endsWith("/admin/dashboard")) {
-    return "admin:dashboard:view";
-  }
-
-  return null;
-}
-
-function canViewItem(
-  item: AdminSidebarItem,
-  permissions: string[],
-  adminRole: AdminRole | null | undefined
-) {
-  if (adminRole === "main_admin") return true;
-
-  const permission = getItemPermission(item);
-  if (!permission) return true;
-
-  return hasPermission(permissions, adminRole, permission);
 }
 
 function getItemStatus(item: AdminSidebarItem) {
@@ -337,46 +207,6 @@ function getActiveHref(pathname: string, items: AdminSidebarItem[]) {
     .sort((a, b) => cleanPath(b.href).length - cleanPath(a.href).length);
 
   return sortedMatches[0]?.href || "";
-}
-
-function filterSidebarItemsByPermissions({
-  items,
-  permissions,
-  adminRole,
-}: {
-  items: AdminSidebarItem[];
-  permissions: string[];
-  adminRole: AdminRole | null | undefined;
-}) {
-  const enabledItems = items.filter((item) => item.is_enabled);
-
-  const childrenByParent = new Map<string, AdminSidebarItem[]>();
-
-  for (const item of enabledItems) {
-    if (!item.parent_id) continue;
-
-    const current = childrenByParent.get(item.parent_id) || [];
-    current.push(item);
-    childrenByParent.set(item.parent_id, current);
-  }
-
-  return enabledItems.filter((item) => {
-    const children = childrenByParent.get(item.id) || [];
-    const visibleChildren = children.filter((child) =>
-      canViewItem(child, permissions, adminRole)
-    );
-
-    if (item.item_type === "group") {
-      const groupAllowed = canViewItem(item, permissions, adminRole);
-      const hasVisibleChildren = visibleChildren.length > 0;
-      const hasOwnHref = Boolean(getSafeHref(item.href));
-      const status = getItemStatus(item);
-
-      return groupAllowed && (hasVisibleChildren || hasOwnHref || status.comingSoon);
-    }
-
-    return canViewItem(item, permissions, adminRole);
-  });
 }
 
 function itemMatchesSearch(item: AdminSidebarItem, query: string) {
@@ -922,10 +752,17 @@ export default function SocialMediaModerationSidebar({
 
 function SocialMediaModerationNavigation({
   permissions = EMPTY_PERMISSIONS,
-  adminRole = null,
-  adminEmail = null,
-  adminName = null,
+  adminRole: initialRole = null,
+  adminName: initialName = null,
 }: Omit<SocialMediaModerationSidebarProps, "children">) {
+  const [viewer, setViewer] = useState<NavigationViewer>({
+    displayName: initialName || "Social media moderator", role: initialRole || "admin",
+    isMainAdmin: initialRole === "main_admin", permissionKeys: permissions,
+  });
+  const adminRole = viewer.role;
+  const adminName = viewer.displayName;
+  const adminEmail = null;
+  const requestRef = useRef<AbortController | null>(null);
   const pathname = usePathname();
 
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -950,119 +787,36 @@ function SocialMediaModerationNavigation({
   const [desktopCollapsed, setDesktopCollapsed] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
 
-  const loadItems = useCallback(
-    async (signal?: AbortSignal) => {
-      setLoadState({
-        loading: true,
-        publicError: "",
-        debugError: "",
-      });
-
-      const timeoutController = new AbortController();
-      const timeoutId = window.setTimeout(
-        () => timeoutController.abort(),
-        SIDEBAR_REQUEST_TIMEOUT_MS,
-      );
-      const abortFromParent = () => timeoutController.abort();
-      signal?.addEventListener("abort", abortFromParent, { once: true });
-
-      try {
-        const res = await fetch(SIDEBAR_API, {
-          cache: "no-store",
-          credentials: "include",
-          signal: timeoutController.signal,
-          headers: {
-            Accept: "application/json",
-          },
-        });
-
-        const text = await res.text();
-
-        let data: AdminSidebarResponse | null = null;
-
-        try {
-          data = JSON.parse(text) as AdminSidebarResponse;
-        } catch {
-          data = null;
-        }
-
-        if (!res.ok || !data?.ok) {
-          const message =
-            data && "error" in data && data.error
-              ? String(data.error)
-              : data && "message" in data && data.message
-              ? String(data.message)
-              : text || `Sidebar API failed with HTTP ${res.status}`;
-
-          throw new Error(message);
-        }
-
-        const filteredItems = filterSidebarItemsByPermissions({
-          items: data.items || [],
-          permissions,
-          adminRole,
-        });
-
-        setItems(filteredItems);
-
-        const initialOpen: Record<string, boolean> = {};
-
-        filteredItems
-          .filter((item) => item.item_type === "group")
-          .forEach((item) => {
-            initialOpen[item.id] = true;
-          });
-
-        setMobileGroupOpen(initialOpen);
-        setDesktopGroupOpen(initialOpen);
-
-        setLoadState({
-          loading: false,
-          publicError: "",
-          debugError: "",
-        });
-      } catch (error) {
-        if (
-          signal?.aborted &&
-          error instanceof DOMException &&
-          error.name === "AbortError"
-        ) {
-          return;
-        }
-
-        const timedOut =
-          timeoutController.signal.aborted &&
-          !signal?.aborted;
-
-        const message = timedOut
-          ? `Sidebar request timed out after ${SIDEBAR_REQUEST_TIMEOUT_MS}ms.`
-          : error instanceof Error
-            ? error.message
-            : "Failed to load admin sidebar.";
-
-        console.error("SocialMediaModerationSidebar loadItems error:", error);
-
-        setLoadState({
-          loading: false,
-          publicError: timedOut
-            ? "Menu took too long to load. Please try again."
-            : getPublicLoadError(),
-          debugError: message,
-        });
-      } finally {
-        window.clearTimeout(timeoutId);
-        signal?.removeEventListener("abort", abortFromParent);
-      }
-    },
-    [permissions, adminRole]
-  );
+  const loadItems = useCallback(async () => {
+    requestRef.current?.abort();
+    const controller = new AbortController();
+    requestRef.current = controller;
+    const timeout = window.setTimeout(() => controller.abort("timeout"), SIDEBAR_REQUEST_TIMEOUT_MS);
+    setItems([]);
+    setLoadState({ loading: true, publicError: "", debugError: "" });
+    try {
+      const res = await fetch(SIDEBAR_API, { cache: "no-store", credentials: "include", signal: controller.signal });
+      const data = await res.json() as AdminSidebarResponse & { viewer?: NavigationViewer };
+      if (requestRef.current !== controller || controller.signal.aborted) return;
+      if (!res.ok || !data.ok || !Array.isArray(data.items) || !data.viewer) throw new Error(data.error || "The menu response is incomplete.");
+      // This API filters rows with trusted account permissions before returning them.
+      setItems(data.items);
+      setViewer(data.viewer);
+      const initialOpen = Object.fromEntries(data.items.filter((item) => item.item_type === "group").map((item) => [item.id, true]));
+      setMobileGroupOpen((previous) => ({ ...initialOpen, ...previous }));
+      setDesktopGroupOpen((previous) => ({ ...initialOpen, ...previous }));
+      setLoadState({ loading: false, publicError: "", debugError: "" });
+    } catch (error) {
+      if (requestRef.current !== controller || controller.signal.reason === "unmount") return;
+      const message = error instanceof Error ? error.message : "The menu could not be loaded.";
+      setLoadState({ loading: false, publicError: controller.signal.aborted ? "Menu took too long to load. Try again." : message, debugError: "" });
+    } finally { window.clearTimeout(timeout); }
+  }, []);
 
   useEffect(() => {
-    const controller = new AbortController();
-
-    loadItems(controller.signal);
-
-    return () => controller.abort();
+    void loadItems();
+    const removeListeners = listenForNavigationChanges(() => { void loadItems(); });
+    return () => { removeListeners(); requestRef.current?.abort("unmount"); requestRef.current = null; };
   }, [loadItems]);
 
   useEffect(() => {
@@ -1243,7 +997,7 @@ function SocialMediaModerationNavigation({
   }
 
   return (
-    <>
+    <ViewerContext.Provider value={viewer}>
       <MobileTopBar onOpen={openMobileMenu} menuButtonRef={menuButtonRef} />
 
       <aside
@@ -1347,7 +1101,7 @@ function SocialMediaModerationNavigation({
         </div>
         </div>
       ) : null}
-    </>
+    </ViewerContext.Provider>
   );
 }
 
@@ -1522,11 +1276,11 @@ function MobileTopBar({
 }
 
 const OTHER_ADMIN_APPS = [
-  { label: "Back to Admin Portal", href: "/Admin/Dashboard", icon: Home, newTab: false },
-  { label: "Open Event Hub", href: "/Admin/EventHub", icon: CalendarDays, newTab: true },
-  { label: "Open Email Centre", href: "/Admin/Email", icon: Mail, newTab: true },
-  { label: "Stock Management", href: "/Admin/StockManagement", icon: Boxes, newTab: false },
-  { label: "Lottery Management", href: "/Admin/LotteryManagement", icon: Ticket, newTab: false },
+  { label: "Back to Admin Portal", href: "/Admin/Dashboard", icon: Home, newTab: false, permission: "admin:dashboard:view" },
+  { label: "Open Event Hub", href: "/Admin/EventHub", icon: CalendarDays, newTab: true, permission: "event_hub:view" },
+  { label: "Open Email Centre", href: "/Admin/Email", icon: Mail, newTab: true, permission: "email:view" },
+  { label: "Stock Management", href: "/Admin/StockManagement", icon: Boxes, newTab: false, permission: "stock:view" },
+  { label: "Lottery Management", href: "/Admin/LotteryManagement", icon: Ticket, newTab: false, permission: "lottery:view" },
 ];
 
 function OtherAdminApps({
@@ -1536,6 +1290,9 @@ function OtherAdminApps({
   collapsed?: boolean;
   onNavigate?: () => void;
 }) {
+  const viewer = useContext(ViewerContext);
+  const availableApps = OTHER_ADMIN_APPS.filter((app) => viewer && (viewer.isMainAdmin || viewer.permissionKeys.includes(app.permission)));
+  if (!availableApps.length) return null;
   return (
     <div className="mb-3 space-y-2" aria-label="Other admin apps">
       {!collapsed ? (
@@ -1543,7 +1300,7 @@ function OtherAdminApps({
           Other Admin Apps
         </p>
       ) : null}
-      {OTHER_ADMIN_APPS.map(({ label, href, icon: Icon, newTab }) => (
+      {availableApps.map(({ label, href, icon: Icon, newTab }) => (
         <Link
           key={href}
           href={href}

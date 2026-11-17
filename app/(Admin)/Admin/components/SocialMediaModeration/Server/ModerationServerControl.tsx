@@ -127,9 +127,12 @@ export default function ModerationServerControl() {
       setData(result);
       setError("");
     } catch (e) {
+      if ([401, 403, 503].includes((e as { status?: number }).status || 0)) {
+        setData(null); setProof(""); setCode(""); setPassword("");
+      }
       if (signal?.reason === "unmount") return;
       setPolicyStatus("unavailable");
-      if ([401, 403].includes((e as { status?: number }).status || 0))
+      if ([401, 403, 503].includes((e as { status?: number }).status || 0))
         setData(null);
       setError(e instanceof Error ? e.message : "Dashboard unavailable.");
     }
@@ -210,6 +213,9 @@ export default function ModerationServerControl() {
         await load();
       }
     } catch (e) {
+      if ([401, 403, 503].includes((e as { status?: number }).status || 0)) {
+        setData(null); setProof(""); setCode(""); setPassword("");
+      }
       setVerificationError(
         e instanceof Error ? e.message : "Verification failed.",
       );
@@ -235,6 +241,9 @@ export default function ModerationServerControl() {
       setMessage("Start requested. Waiting for the next worker check.");
       await load();
     } catch (e) {
+      if ([401, 403, 503].includes((e as { status?: number }).status || 0)) {
+        setData(null); setProof(""); setCode(""); setPassword("");
+      }
       setError(e instanceof Error ? e.message : "Start failed.");
     } finally {
       submitting.current = false;
@@ -259,6 +268,9 @@ export default function ModerationServerControl() {
       setMessage("Human review recorded.");
       await load();
     } catch (e) {
+      if ([401, 403, 503].includes((e as { status?: number }).status || 0)) {
+        setData(null); setProof(""); setCode(""); setPassword("");
+      }
       setMessage(
         e instanceof Error ? e.message : "Review could not be recorded.",
       );
@@ -764,3 +776,4 @@ export default function ModerationServerControl() {
     </div>
   );
 }
+

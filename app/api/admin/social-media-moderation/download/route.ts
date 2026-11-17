@@ -1,3 +1,4 @@
+import { requireModerationOperation, ModerationAccessError } from "@/lib/moderation/access";
 import { Document, HeadingLevel, Packer, Paragraph } from "docx";
 import { db, evidenceAdmin, IMAGES, londonDate, readEvidence, UUID } from "../../../../(Admin)/Admin/components/SocialMediaModeration/Server/Documents/evidence";
 
@@ -14,7 +15,7 @@ function attachment(body: BodyInit, type: string, name: string) {
 
 export async function GET(request: Request) {
   try {
-    if (!(await evidenceAdmin())) return new Response("Forbidden", { status: 403, headers });
+    await requireModerationOperation("exportEvidence");
     const query = new URL(request.url).searchParams;
     const image = query.get("image");
     if (image && UUID.test(image)) {
@@ -61,7 +62,9 @@ export async function GET(request: Request) {
     ] }] });
     return attachment(Uint8Array.from(await Packer.toBuffer(document)),
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document", name);
-  } catch {
+  } catch (error) {
+    if (error instanceof ModerationAccessError) return new Response(error.message, { status: error.status, headers });
     return new Response("Could not prepare evidence download", { status: 503, headers });
   }
 }
+

@@ -1,3 +1,4 @@
+import { requireModerationScreen, canModerationOperation } from "@/lib/moderation/access";
 import OpenAIConnectionCheck from "../Server/OpenAIConnectionCheck";
 import { db, evidenceAdmin, londonDate } from "../Server/Documents/evidence";
 
@@ -19,9 +20,10 @@ function diagnostic(error: string | null) {
 
 export default async function ModerationConnectionsPage() {
   if (!(await evidenceAdmin())) {
-    return <main className="p-6"><h1>Connections</h1><p>Connections are restricted to main admins.</p></main>;
+    return <main className="p-6"><h1>Connections</h1><p>Moderation viewing permission is required.</p></main>;
   }
 
+  const actor = await requireModerationScreen();
   const result = await db.from("moderation_connections").select("platform,status,checked_at,error")
     .in("platform", providers.map(provider => provider.platform));
 
@@ -72,7 +74,7 @@ export default async function ModerationConnectionsPage() {
           </div>
         </dl>
         <div className="mt-4 grid gap-4 lg:grid-cols-2">
-          <OpenAIConnectionCheck />
+          {canModerationOperation(actor, "checkConnection") ? <OpenAIConnectionCheck /> : <p className="text-sm text-slate-300">Running a connection test requires moderation control permission.</p>}
           <div className="rounded-xl border border-white/15 p-4 text-sm text-slate-300">
             <h3 className="font-semibold text-white">What a successful test means</h3>
             <p className="mt-2">Supabase reached the OpenAI moderation endpoint and received a valid response. The test does not activate comment processing or take any action on Meta.</p>
@@ -94,3 +96,4 @@ export default async function ModerationConnectionsPage() {
     </main>
   );
 }
+

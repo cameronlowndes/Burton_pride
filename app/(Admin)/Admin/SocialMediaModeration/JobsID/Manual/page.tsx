@@ -1,3 +1,4 @@
+import { requireModerationOperationScreen } from "@/lib/moderation/access";
 import type { Metadata } from "next";
 import { manualAdmin } from "@/lib/moderation/manual-jobs-server";
 import { JOBS_PAGE } from "@/lib/moderation/manual-job-input";
@@ -8,6 +9,7 @@ export const metadata: Metadata = {
   title: "Create manual moderation job | Burton Pride Admin",
 };
 export default async function Page() {
+  await requireModerationOperationScreen("createManual");
   let admin: Awaited<ReturnType<typeof manualAdmin>> = null,
     error = "";
   try {
@@ -47,3 +49,4 @@ export default async function Page() {
     </main>
   );
 }
+

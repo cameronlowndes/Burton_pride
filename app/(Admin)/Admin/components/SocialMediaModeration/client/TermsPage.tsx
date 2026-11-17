@@ -1,8 +1,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { getCurrentAdmin } from "@/lib/adminPermissions";
+import { optionalModeration, requireModerationOperationScreen, canModerationOperation } from "@/lib/moderation/access";
 import { supabaseAdmin } from "@/lib/supabase/supabaseAdmin";
-import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
@@ -13,29 +12,11 @@ const METADATA = "id,version,file_name,uploaded_at,approved_at";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 async function access() {
-  const admin = await getCurrentAdmin();
-  if (!admin) return null;
-  const client = await createClient();
-  const { data: { user }, error } = await client.auth.getUser();
-  if (error || !user) return null;
-
-  const result = await supabaseAdmin.from("admin_users")
-    .select("id,role,is_main_admin")
-    .eq("supabase_user_id", user.id)
-    .eq("is_active", true)
-    .maybeSingle();
-  if (result.error) throw new Error("Could not verify moderation policy access.");
-  if (!result.data) return null;
-  return {
-    id: result.data.id,
-    canManage: result.data.is_main_admin === true || result.data.role === "main_admin",
-  };
+  const actor = await optionalModeration();
+  return actor ? { id: actor.id, canManage: canModerationOperation(actor, "managePolicy") } : null;
 }
-
 async function manager() {
-  const actor = await access();
-  if (!actor?.canManage) redirect(PATH + "?result=forbidden");
-  return actor;
+  return requireModerationOperationScreen("managePolicy");
 }
 
 async function uploadTerms(formData: FormData) {
@@ -264,3 +245,4 @@ function PolicyText({ body, markdown }: { body: string; markdown: boolean }) {
     </article>
   );
 }
+

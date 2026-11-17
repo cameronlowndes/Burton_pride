@@ -1,1132 +1,192 @@
 "use client";
 
-import {
-  useEffect,
-  useMemo,
-  useState,
-  type ElementType,
-} from "react";
-import {
-  AlertTriangle,
-  Award,
-  BarChart3,
-  CalendarDays,
-  ClipboardList,
-  CreditCard,
-  FileText,
-  Gift,
-  LayoutDashboard,
-  ListOrdered,
-  Logs,
-  RefreshCw,
-  Settings,
-  ShieldCheck,
-  Tags,
-  Ticket,
-  TicketCheck,
-  Trophy,
-  Users,
-} from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ElementType } from "react";
+import { AlertTriangle, Award, BarChart3, CalendarDays, ClipboardList, CreditCard, FileText, Gift,
+  LayoutDashboard, ListOrdered, Logs, RefreshCw, Settings, ShieldCheck, Tags, Ticket, TicketCheck, Trophy, Users } from "lucide-react";
+import { MODERATION_ROUTES, safeNavigationHref, type NavigationItem } from "@/lib/moderation/navigation";
+import { notifyNavigationChanged } from "@/lib/moderation/navigation-events";
 
-const MODERATION_ROOT = "/Admin/Dashboard/SocialMediaModeration";
-const API_ROUTE = "/api/admin/social-media-moderation/sidebar-editor";
+const API = "/api/admin/social-media-moderation/sidebar-editor";
+const icons: Record<string, ElementType> = { LayoutDashboard, Ticket, TicketCheck, CreditCard, ListOrdered, Trophy, Award, Gift, Users, BarChart3, FileText, ClipboardList, ShieldCheck, Logs, Settings, CalendarDays, Tags };
+type Form = { label: string; href: string; description: string; permission_key: string; disabled_reason: string;
+  sort_order: number; is_enabled: boolean; disabled: boolean; is_coming_soon: boolean; open_in_new_tab: boolean };
+const emptyForm: Form = { label: "", href: "", description: "", permission_key: "", disabled_reason: "", sort_order: 0,
+  is_enabled: true, disabled: false, is_coming_soon: false, open_in_new_tab: false };
+type Notice = { kind: "success" | "error"; text: string } | null;
+const control = "w-full rounded-xl border border-white/20 bg-slate-950 px-3 py-3 text-sm text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-300";
+const button = "inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-white/20 px-4 py-2 text-sm font-bold hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-300 disabled:cursor-not-allowed disabled:opacity-50";
 
-type Notice =
-  | { type: "success"; message: string; details?: unknown }
-  | { type: "error"; message: string; details?: unknown }
-  | null;
-
-type ModerationSidebarItem = {
-  id: string;
-  label: string;
-  href: string;
-  icon: string;
-  sort_order: number;
-  is_enabled: boolean;
-  created_at?: string;
-};
-
-type ModerationSidebarResponse = {
-  ok: boolean;
-  error?: string;
-  message?: string;
-  route?: string;
-  method?: string;
-  status?: number;
-  table?: string;
-  operation?: string;
-  query?: string;
-  supabaseCode?: string;
-  supabaseHint?: string;
-  supabaseDetails?: string;
-  likelyFixes?: string[];
-  rawResponse?: string;
-  items?: ModerationSidebarItem[];
-  item?: ModerationSidebarItem;
-  deletedId?: string;
-  deleted?: ModerationSidebarItem | null;
-  already_deleted?: boolean;
-};
-
-type EditorMode = "create" | "edit";
-
-type FormState = {
-  label: string;
-  href: string;
-  icon: string;
-  sort_order: number;
-  is_enabled: boolean;
-};
-
-const defaultForm: FormState = {
-  label: "",
-  href: "",
-  icon: "LayoutDashboard",
-  sort_order: 0,
-  is_enabled: true,
-};
-
-const iconMap: Record<string, ElementType> = {
-  LayoutDashboard,
-  Ticket,
-  TicketCheck,
-  CreditCard,
-  ListOrdered,
-  Trophy,
-  Award,
-  Gift,
-  Users,
-  BarChart3,
-  FileText,
-  ClipboardList,
-  ShieldCheck,
-  Logs,
-  Settings,
-  CalendarDays,
-  Tags,
-};
-
-const allModerationIconNames = Object.keys(iconMap);
-
-function getModerationIconCandidates(labelValue: string, hrefValue = "") {
-  const value = `${labelValue} ${hrefValue}`.trim().toLowerCase();
-  const preferred: string[] = [];
-  if (/home|dashboard/.test(value)) preferred.push("LayoutDashboard");
-  if (/comment|review|queue|moderation/.test(value)) preferred.push("ShieldCheck", "ClipboardList");
-  if (/account|user|facebook|instagram/.test(value)) preferred.push("Users");
-  if (/rule|setting|filter/.test(value)) preferred.push("Settings", "Tags");
-  if (/audit|history|log/.test(value)) preferred.push("Logs", "FileText");
-  if (/report|analytic/.test(value)) preferred.push("BarChart3");
-  return Array.from(new Set([...preferred, ...allModerationIconNames]));
+function chooseIcon(form: Form, items: NavigationItem[], editingId: string | null) {
+  const used = new Set(items.filter((item) => item.id !== editingId).map((item) => item.icon));
+  const current = items.find((item) => item.id === editingId)?.icon;
+  if (current && icons[current] && !used.has(current)) return current;
+  const value = `${form.label} ${form.href}`.toLowerCase();
+  const preferred = /home|dashboard/.test(value) ? "LayoutDashboard" : /history|audit|logs/.test(value) ? "Logs"
+    : /connection|account|facebook|instagram/.test(value) ? "Users" : /document|terms|policy/.test(value) ? "FileText" : "ShieldCheck";
+  return [preferred, ...Object.keys(icons)].find((name) => !used.has(name)) || "";
 }
-
-function getUsedIconNames(
-  items: ModerationSidebarItem[],
-  excludeItemId?: string | null,
-) {
-  return new Set(
-    items
-      .filter((item) => item.id !== excludeItemId)
-      .map((item) => String(item.icon || "").trim())
-      .filter((icon) => Boolean(iconMap[icon])),
-  );
-}
-
-function selectUniqueModerationIcon(
-  label: string,
-  href: string,
-  items: ModerationSidebarItem[],
-  excludeItemId?: string | null,
-) {
-  const usedIcons = getUsedIconNames(items, excludeItemId);
-  const candidates = getModerationIconCandidates(label, href);
-
-  return candidates.find((icon) => !usedIcons.has(icon)) || "";
-}
-
-function inferModerationIconName(labelValue: string, hrefValue = "") {
-  return getModerationIconCandidates(labelValue, hrefValue)[0] || "Ticket";
-}
-
-function getIcon(name: string | null | undefined): ElementType {
-  return iconMap[String(name || "")] || Ticket;
-}
-
-function clsx(...values: Array<string | false | null | undefined>) {
-  return values.filter(Boolean).join(" ");
-}
-
-function normaliseHref(value: string) {
-  const clean = String(value || "").trim();
-  if (!clean) return "";
-  if (clean.startsWith("/")) return clean;
-  return `/${clean}`;
-}
-
-async function readJson(res: Response): Promise<ModerationSidebarResponse> {
-  const text = await res.text();
-
+async function request(method = "GET", body?: unknown, query = "") {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 15000);
   try {
-    return text ? JSON.parse(text) : { ok: false };
-  } catch {
-    return {
-      ok: false,
-      error: "API returned invalid JSON.",
-      rawResponse: text,
-      status: res.status,
-    };
-  }
-}
-
-function getErrorMessage(data: ModerationSidebarResponse, fallback: string) {
-  return (
-    data.error ||
-    data.message ||
-    data.supabaseDetails ||
-    data.supabaseHint ||
-    data.rawResponse ||
-    fallback
-  );
-}
-
-function toReadableDetails(value: unknown) {
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
+    const response = await fetch(API + query, { method, credentials: "include", cache: "no-store", signal: controller.signal,
+      headers: body ? { "Content-Type": "application/json" } : undefined, body: body ? JSON.stringify(body) : undefined });
+    let data: { ok?: boolean; error?: string; items?: NavigationItem[]; item?: NavigationItem };
+    try { data = await response.json(); } catch { throw new Error("The menu returned an invalid response. Refresh and try again."); }
+    if (!data || typeof data !== "object") throw new Error("The menu returned an invalid response. Refresh and try again.");
+    if (!response.ok || !data.ok) throw new Error(data.error || `The menu request failed (${response.status}).`);
+    return data;
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error("The request timed out. Refresh to check the saved state before trying again.");
+    throw error;
+  } finally { window.clearTimeout(timeout); }
 }
 
 export default function ModerationSidebarAdminClient() {
-  const [items, setItems] = useState<ModerationSidebarItem[]>([]);
+  const [items, setItems] = useState<NavigationItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [notice, setNotice] = useState<Notice>(null);
-
-  const [editorMode, setEditorMode] = useState<EditorMode>("create");
-  const [form, setForm] = useState<FormState>(defaultForm);
+  const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
+  const [form, setForm] = useState<Form>(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
+  const [query, setQuery] = useState("");
+  const [notice, setNotice] = useState<Notice>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<NavigationItem | null>(null);
+  const dialog = useRef<HTMLDialogElement>(null);
 
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [deleteId, setDeleteId] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState(false);
-
-  useEffect(() => {
-    loadItems();
-  }, []);
-
-  async function loadItems() {
+  const reload = useCallback(async () => {
     setLoading(true);
-    setNotice(null);
-
     try {
-      const res = await fetch(API_ROUTE, {
-        cache: "no-store",
-        credentials: "include",
-      });
+      const data = await request();
+      if (!Array.isArray(data.items)) throw new Error("The saved menu list is missing from the response.");
+      setItems(data.items);
+      setLoaded(true);
+    } catch (error) {
+      setItems([]); setLoaded(false);
+      throw error;
+    } finally { setLoading(false); }
+  }, []);
+  useEffect(() => { void reload().catch((error: Error) => setNotice({ kind: "error", text: error.message })); }, [reload]);
+  useEffect(() => { if (deleteTarget && dialog.current && !dialog.current.open) dialog.current.showModal(); }, [deleteTarget]);
 
-      const data = await readJson(res);
-
-      if (!res.ok || !data.ok) {
-        throw {
-          message: getErrorMessage(data, "Failed to load moderation sidebar items."),
-          details: data,
-        };
-      }
-
-      const sorted = [...(data.items || [])].sort(
-        (a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0)
-      );
-
-      setItems(
-        sorted.map((item) => ({
-          ...item,
-          icon:
-            item.icon && iconMap[item.icon]
-              ? item.icon
-              : inferModerationIconName(item.label, item.href),
-        }))
-      );
-    } catch (error: any) {
-      setNotice({
-        type: "error",
-        message: error?.message || "Failed to load moderation sidebar items.",
-        details: error?.details || error,
-      });
-    } finally {
-      setLoading(false);
-    }
+  async function run(action: () => Promise<void>, success: string, mutation = true) {
+    if (busyRef.current) return;
+    busyRef.current = true; setBusy(true); setNotice(null);
+    let saved = false;
+    try {
+      await action(); saved = mutation;
+      if (mutation) notifyNavigationChanged();
+      await reload();
+      setNotice({ kind: "success", text: success });
+    } catch (error) {
+      setNotice({ kind: "error", text: (saved ? "The change was saved, but the list could not be refreshed. " : "") +
+        (error instanceof Error ? error.message : "The menu request failed.") });
+    } finally { busyRef.current = false; setBusy(false); }
   }
-
-  const filteredItems = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return items;
-
-    return items.filter(
-      (item) =>
-        item.label.toLowerCase().includes(q) ||
-        (item.href || "").toLowerCase().includes(q) ||
-        item.icon.toLowerCase().includes(q)
-    );
-  }, [items, search]);
-
-  function resetEditor() {
-    setEditorMode("create");
-    setEditingId(null);
-    setForm({
-      ...defaultForm,
-      icon: selectUniqueModerationIcon("", "", items) || "",
-    });
-  }
-
-  function startCreate() {
-    setEditorMode("create");
-    setEditingId(null);
-    setForm({
-      ...defaultForm,
-      icon: selectUniqueModerationIcon("", "", items) || "",
-      sort_order: items.length,
-    });
-    setNotice(null);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }
-
-  function preparePresetLink(label: string, href: string) {
-    setEditorMode("create");
-    setEditingId(null);
-    setForm({
-      label,
-      href,
-      icon: selectUniqueModerationIcon(label, href, items) || "",
-      sort_order: items.length,
-      is_enabled: true,
-    });
-    setNotice(null);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }
-
-  function prepareHomeLink() {
-    preparePresetLink("Home", MODERATION_ROOT);
-  }
-
-  function startEdit(item: ModerationSidebarItem) {
-    setEditorMode("edit");
+  function reset() { setEditingId(null); setForm({ ...emptyForm, sort_order: items.length ? Math.max(...items.map((item) => item.sort_order)) + 1 : 0 }); }
+  function edit(item: NavigationItem) {
     setEditingId(item.id);
-    setForm({
-      label: item.label,
-      href: item.href || "",
-      icon:
-        item.icon &&
-        iconMap[item.icon] &&
-        !items.some(
-          (other) => other.id !== item.id && other.icon === item.icon,
-        )
-          ? item.icon
-          : selectUniqueModerationIcon(item.label, item.href, items, item.id) || "",
-      sort_order: Number(item.sort_order || 0),
-      is_enabled: Boolean(item.is_enabled),
-    });
+    setForm({ label: item.label, href: item.href || "", description: item.description || "", permission_key: item.permission_key || "",
+      disabled_reason: item.disabled_reason || "", sort_order: item.sort_order, is_enabled: item.is_enabled,
+      disabled: Boolean(item.disabled), is_coming_soon: Boolean(item.is_coming_soon), open_in_new_tab: item.open_in_new_tab });
     setNotice(null);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    document.getElementById("moderation-link-label")?.focus();
   }
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setSaving(true);
-    setNotice(null);
-
-    try {
-      const label = form.label.trim();
-      const href = normaliseHref(form.href);
-      const uniqueIcon = selectUniqueModerationIcon(
-        label,
-        href,
-        items,
-        editingId,
-      );
-
-      if (!label) throw new Error("Please enter a label.");
-      if (!href) throw new Error("Please enter a URL / href.");
-
-      if (!uniqueIcon) {
-        throw new Error(
-          "No unused sidebar icons are available. Delete an unused page or add more icons before creating another link.",
-        );
-      }
-
-      const duplicateOwner = items.find(
-        (item) => item.id !== editingId && item.icon === uniqueIcon,
-      );
-
-      if (duplicateOwner) {
-        throw new Error(
-          `The ${uniqueIcon} icon is already used by "${duplicateOwner.label}". Every moderation sidebar page must use a different icon.`,
-        );
-      }
-
-      const payload = {
-        id: editingId || undefined,
-        label,
-        href,
-        icon: uniqueIcon,
-        sort_order: Number(form.sort_order) || 0,
-        is_enabled: form.is_enabled,
-      };
-
-      const method = editingId ? "PATCH" : "POST";
-
-      const res = await fetch(API_ROUTE, {
-        method,
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      const data = await readJson(res);
-
-      if (!res.ok || !data.ok) {
-        throw {
-          message: getErrorMessage(data, "Failed to save moderation sidebar item."),
-          details: data,
-        };
-      }
-
-      setNotice({
-        type: "success",
-        message: editingId
-          ? "Moderation sidebar item updated successfully."
-          : "Moderation sidebar item created successfully.",
-      });
-
-      resetEditor();
-      await loadItems();
-    } catch (error: any) {
-      setNotice({
-        type: "error",
-        message: error?.message || "Failed to save moderation sidebar item.",
-        details: error?.details || error,
-      });
-    } finally {
-      setSaving(false);
-    }
+  const icon = chooseIcon(form, items, editingId);
+  const Icon = icons[icon] || ShieldCheck;
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    await run(async () => {
+      if (!icon) throw new Error("No unused icons remain. Remove an unused link or extend the supported icons before adding another.");
+      const href = safeNavigationHref(form.href);
+      if (!href) throw new Error("Use a valid internal URL starting with /Admin/.");
+      await request(editingId ? "PATCH" : "POST", { ...form, href, label: form.label.trim(), id: editingId || undefined, icon });
+      reset();
+    }, editingId ? "The menu link was updated." : "The menu link was created.");
   }
-
-  function handleDelete(id: string) {
-    setDeleteId(id);
-    setDeleteDialogOpen(true);
+  async function move(item: NavigationItem, direction: number) {
+    const index = items.findIndex((row) => row.id === item.id);
+    const target = index + direction;
+    if (target < 0 || target >= items.length) return;
+    const ordered = [...items]; [ordered[index], ordered[target]] = [ordered[target], ordered[index]];
+    await run(async () => { await request("PUT", { orderedIds: ordered.map((row) => row.id), expectedOrder: items.map((row) => row.id) }); }, "The complete menu order was saved.");
   }
-
-  function closeDeleteDialog() {
-    if (deleting) return;
-
-    setDeleteDialogOpen(false);
-    setDeleteId(null);
-  }
-
-  async function confirmDelete() {
-    if (!deleteId) return;
-
-    const deletingId = deleteId;
-
-    setDeleting(true);
-    setNotice(null);
-
-    try {
-      const res = await fetch(`${API_ROUTE}?id=${encodeURIComponent(deleteId)}`, {
-        method: "DELETE",
-        credentials: "include",
-      });
-
-      const data = await readJson(res);
-
-      if (!res.ok || !data.ok) {
-        throw {
-          message: getErrorMessage(
-            data,
-            "Failed to delete moderation sidebar item."
-          ),
-          details: data,
-        };
-      }
-
-      setNotice({
-        type: "success",
-        message: data.already_deleted
-          ? "The sidebar item had already been deleted and has now been removed from this screen."
-          : "Moderation sidebar item deleted successfully.",
-      });
-
-      if (editingId === deletingId) resetEditor();
-
-      /*
-       * Remove the card immediately, including when Supabase reports that
-       * the row had already been deleted by an earlier request.
-       */
-      setItems((current) =>
-        current.filter((item) => item.id !== deletingId),
-      );
-
-      /*
-       * DELETE returns the current database list. Prefer that response over
-       * a second GET so stale client data cannot put the deleted card back.
-       */
-      if (Array.isArray(data.items)) {
-        const refreshedItems = [...data.items]
-          .sort(
-            (a, b) =>
-              Number(a.sort_order || 0) - Number(b.sort_order || 0),
-          )
-          .map((item) => ({
-            ...item,
-            icon:
-              item.icon && iconMap[item.icon]
-                ? item.icon
-                : inferModerationIconName(item.label, item.href),
-          }));
-
-        setItems(refreshedItems);
-      }
-
-      setDeleteDialogOpen(false);
-      setDeleteId(null);
-    } catch (error: any) {
-      setNotice({
-        type: "error",
-        message: error?.message || "Failed to delete moderation sidebar item.",
-        details: error?.details || error,
-      });
-    } finally {
-      setDeleting(false);
-    }
-  }
-
-  async function toggleEnabled(item: ModerationSidebarItem) {
-    try {
-      const res = await fetch(API_ROUTE, {
-        method: "PATCH",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: item.id,
-          is_enabled: !item.is_enabled,
-        }),
-      });
-
-      const data = await readJson(res);
-
-      if (!res.ok || !data.ok) {
-        throw {
-          message: getErrorMessage(data, "Failed to update item."),
-          details: data,
-        };
-      }
-
-      await loadItems();
-    } catch (error: any) {
-      setNotice({
-        type: "error",
-        message: error?.message || "Failed to update item.",
-        details: error?.details || error,
-      });
-    }
-  }
-
-  async function duplicateItem(item: ModerationSidebarItem) {
-    try {
-      const duplicateLabel = `${item.label} Copy`;
-      const duplicateHref = item.href;
-      const uniqueIcon = selectUniqueModerationIcon(
-        duplicateLabel,
-        duplicateHref,
-        items,
-      );
-
-      if (!uniqueIcon) {
-        throw new Error(
-          "Cannot duplicate this item because every available icon is already in use.",
-        );
-      }
-
-      const res = await fetch(API_ROUTE, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          label: duplicateLabel,
-          href: duplicateHref,
-          icon: uniqueIcon,
-          sort_order: Number(item.sort_order || 0) + 1,
-          is_enabled: false,
-        }),
-      });
-
-      const data = await readJson(res);
-
-      if (!res.ok || !data.ok) {
-        throw {
-          message: getErrorMessage(data, "Failed to duplicate item."),
-          details: data,
-        };
-      }
-
-      setNotice({
-        type: "success",
-        message: "Moderation sidebar item duplicated successfully.",
-      });
-
-      await loadItems();
-    } catch (error: any) {
-      setNotice({
-        type: "error",
-        message: error?.message || "Failed to duplicate item.",
-        details: error?.details || error,
-      });
-    }
-  }
-
-  async function moveItem(item: ModerationSidebarItem, direction: "up" | "down") {
-    const siblings = [...items].sort(
-      (a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0)
-    );
-
-    const index = siblings.findIndex((x) => x.id === item.id);
-    if (index === -1) return;
-
-    const targetIndex = direction === "up" ? index - 1 : index + 1;
-    if (targetIndex < 0 || targetIndex >= siblings.length) return;
-
-    const reordered = [...siblings];
-
-    [reordered[index], reordered[targetIndex]] = [
-      reordered[targetIndex],
-      reordered[index],
-    ];
-
-    try {
-      const results = await Promise.all(
-        reordered.map((x, i) =>
-          fetch(API_ROUTE, {
-            method: "PATCH",
-            credentials: "include",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              id: x.id,
-              sort_order: i,
-            }),
-          }).then(async (res) => ({
-            res,
-            data: await readJson(res),
-          }))
-        )
-      );
-
-      const failed = results.find((result) => !result.res.ok || !result.data.ok);
-
-      if (failed) {
-        throw {
-          message: getErrorMessage(failed.data, "Failed to reorder items."),
-          details: failed.data,
-        };
-      }
-
-      await loadItems();
-    } catch (error: any) {
-      setNotice({
-        type: "error",
-        message: error?.message || "Failed to reorder items.",
-        details: error?.details || error,
-      });
-    }
-  }
-
-  const editorTitle =
-    editorMode === "edit" ? "Edit moderation sidebar item" : "Create moderation link";
-
-  const SelectedIcon = getIcon(form.icon || "Ticket");
+  const filtered = useMemo(() => {
+    const value = query.trim().toLowerCase();
+    return items.filter((item) => `${item.label} ${item.href} ${item.description || ""} ${item.permission_key || ""}`.toLowerCase().includes(value));
+  }, [items, query]);
+  const unavailable = busy || loading;
 
   return (
-    <div className="mx-auto max-w-7xl p-4 md:p-6">
-      <div className="mb-6 rounded-3xl border border-white/10 bg-white/10 p-6 shadow-xl backdrop-blur-xl">
-        <h1 className="text-2xl font-extrabold text-white">
-          Social Media Moderation Sidebar Editor
-        </h1>
-
-        <p className="mt-2 text-sm text-white/70">
-          Manage the Social Media Moderation sidebar links. Other Admin Apps shortcuts beside Log out are managed separately in the sidebar component. Every page gets a different automatic icon, and duplicate icons are blocked.
-        </p>
-      </div>
-
-      {notice && <NoticeBox notice={notice} onRetry={loadItems} />}
-
-      <div className="grid gap-6 xl:grid-cols-[420px_minmax(0,1fr)]">
-        <div className="space-y-6">
-          <div className="rounded-3xl border border-white/10 bg-white/10 p-5 shadow-xl backdrop-blur-xl">
-            <h2 className="mb-4 text-lg font-bold text-white">Quick actions</h2>
-
-            <div className="grid gap-3">
-              <button
-                type="button"
-                onClick={startCreate}
-                className="rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-left text-sm font-semibold text-white transition hover:bg-white/15"
-              >
-                + Create moderation link
-              </button>
-
-              <QuickActionButton icon={LayoutDashboard} label="Prepare Home link" onClick={prepareHomeLink} />
-            </div>
+    <div className="w-full space-y-6 p-4 text-white md:p-6">
+      <header className="rounded-3xl border border-white/15 bg-white/5 p-6">
+        <h1 className="text-2xl font-black">Social Media Moderation Sidebar Editor</h1>
+        <p className="mt-3 text-sm leading-6 text-slate-300">Manage saved top-level links for the sidebar and Home shortcuts. Existing groups and nested links are preserved.</p>
+      </header>
+      {notice ? <div role={notice.kind === "error" ? "alert" : "status"} className={`rounded-2xl border p-4 text-sm ${notice.kind === "error" ? "border-red-300/30 bg-red-500/10" : "border-emerald-300/30 bg-emerald-500/10"}`}>
+        {notice.kind === "error" ? <AlertTriangle className="mb-2 h-5 w-5" aria-hidden="true" /> : null}{notice.text}
+      </div> : null}
+      <div className="grid items-start gap-6 xl:grid-cols-[minmax(20rem,28rem)_minmax(0,1fr)]">
+        <section className="rounded-3xl border border-white/15 bg-white/5 p-5" aria-labelledby="menu-editor-heading">
+          <div className="mb-5 flex flex-wrap gap-3">
+            <button type="button" className={button} disabled={unavailable || !loaded} onClick={reset}>Create link</button>
+            <button type="button" className={button} disabled={unavailable || !loaded} onClick={() => { reset(); setForm((old) => ({ ...old, label: "Home", href: MODERATION_ROUTES.home })); }}>Prepare Home link</button>
           </div>
-
-          <div className="rounded-3xl border border-white/10 bg-white/10 p-5 shadow-xl backdrop-blur-xl">
-            <h2 className="mb-4 text-lg font-bold text-white">{editorTitle}</h2>
-
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="mb-2 block text-sm font-medium text-white/80">
-                  Label
-                </label>
-
-                <input
-                  value={form.label}
-                  onChange={(e) => {
-                    const label = e.target.value;
-
-                    setForm((prev) => ({
-                      ...prev,
-                      label,
-                      icon: selectUniqueModerationIcon(label, prev.href, items, editingId) || "",
-                    }));
-                  }}
-                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-white/35"
-                  placeholder="e.g. Audit Logs"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="mb-2 block text-sm font-medium text-white/80">
-                  URL / href
-                </label>
-
-                <input
-                  value={form.href}
-                  onChange={(e) => {
-                    const href = e.target.value;
-
-                    setForm((prev) => ({
-                      ...prev,
-                      href,
-                      icon: selectUniqueModerationIcon(prev.label, href, items, editingId) || "",
-                    }));
-                  }}
-                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-white/35"
-                  placeholder={MODERATION_ROOT}
-                  required
-                />
-
-                <p className="mt-2 text-xs text-white/50">
-                  Example: {MODERATION_ROOT}
-                </p>
-              </div>
-
-              <div>
-                <label className="mb-2 block text-sm font-medium text-white/80">
-                  Automatic icon
-                </label>
-
-                <div className="flex items-center gap-4 rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
-                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/10 text-white">
-                    <SelectedIcon className="h-5 w-5" />
-                  </div>
-
-                  <div className="min-w-0">
-                    <p className="text-sm font-bold text-white">
-                      {form.icon}
-                    </p>
-
-                    <p className="mt-1 text-xs leading-5 text-white/50">
-                      The best unused icon is selected automatically. An icon
-                      already assigned to another Moderation page cannot be reused.
-                    </p>
-
-                    {!form.icon ? (
-                      <p className="mt-2 text-xs font-bold text-red-200">
-                        No unused icons remain. Add more supported icons or
-                        remove an unused sidebar page.
-                      </p>
-                    ) : null}
-                  </div>
+          <h2 id="menu-editor-heading" className="mb-5 text-lg font-bold">{editingId ? "Edit menu link" : "Create menu link"}</h2>
+          <form onSubmit={submit}>
+            <fieldset disabled={unavailable || !loaded} className="space-y-4 disabled:opacity-60">
+              <div><label htmlFor="moderation-link-label" className="mb-2 block text-sm">Label</label><input id="moderation-link-label" className={control} required maxLength={200} value={form.label} onChange={(event) => setForm({ ...form, label: event.target.value })} /></div>
+              <div><label htmlFor="moderation-link-href" className="mb-2 block text-sm">URL</label><input id="moderation-link-href" className={control} required maxLength={2048} placeholder={MODERATION_ROUTES.home} value={form.href} onChange={(event) => setForm({ ...form, href: event.target.value })} /></div>
+              <div><label htmlFor="moderation-link-description" className="mb-2 block text-sm">Description</label><textarea id="moderation-link-description" className={control} maxLength={2048} value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></div>
+              <div><label htmlFor="moderation-link-permission" className="mb-2 block text-sm">Required permission key</label><input id="moderation-link-permission" className={control} maxLength={200} placeholder="e.g. site_pages:manage" value={form.permission_key} onChange={(event) => setForm({ ...form, permission_key: event.target.value })} />
+                <p className="mt-2 text-xs leading-5 text-slate-300">Use an existing permission from Admin Users. Blank means visible to signed-in admins; each destination still enforces its own access rules.</p></div>
+              <div><label htmlFor="moderation-link-sort" className="mb-2 block text-sm">Sort order</label><input id="moderation-link-sort" className={control} type="number" min={-1000000} max={1000000} step={1} value={form.sort_order} onChange={(event) => setForm({ ...form, sort_order: Number(event.target.value) })} /></div>
+              <div className="flex items-center gap-3 rounded-xl border border-white/15 p-3"><Icon className="h-5 w-5" aria-hidden="true" /><span className="text-sm">Automatic icon: {icon || "No unused icon available"}</span></div>
+              {([ ["is_enabled", "Enabled"], ["disabled", "Show as unavailable"], ["is_coming_soon", "Coming soon"], ["open_in_new_tab", "Open in a new tab"] ] as const).map(([field, label]) => (
+                <label key={field} className="flex min-h-11 items-center gap-3 text-sm"><input type="checkbox" checked={form[field]} onChange={(event) => setForm({ ...form, [field]: event.target.checked })} />{label}</label>
+              ))}
+              <div><label htmlFor="moderation-link-reason" className="mb-2 block text-sm">Unavailable / coming soon message</label><input id="moderation-link-reason" className={control} maxLength={200} value={form.disabled_reason} onChange={(event) => setForm({ ...form, disabled_reason: event.target.value })} /></div>
+              <div className="flex gap-3"><button type="submit" className={`${button} bg-purple-600`} disabled={!icon}>{busy ? "Saving…" : editingId ? "Update link" : "Create link"}</button><button type="button" className={button} onClick={reset}>Clear</button></div>
+            </fieldset>
+          </form>
+        </section>
+        <section className="min-w-0 rounded-3xl border border-white/15 bg-white/5 p-5" aria-labelledby="saved-menu-heading" aria-busy={loading || busy}>
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-3"><h2 id="saved-menu-heading" className="text-lg font-bold">Saved menu links</h2><button type="button" className={button} disabled={unavailable} onClick={() => void run(async () => {}, "The saved menu was refreshed.", false)}><RefreshCw className="h-4 w-4" aria-hidden="true" />Refresh</button></div>
+          <label htmlFor="moderation-editor-search" className="sr-only">Search saved menu links</label><input id="moderation-editor-search" type="search" className={`${control} mb-5`} placeholder="Search saved links…" value={query} onChange={(event) => setQuery(event.target.value)} />
+          {loading ? <p role="status">Loading saved links…</p> : !loaded ? <p>The menu could not be loaded. Refresh to try again.</p> : !filtered.length ? <p className="text-sm text-slate-300">{items.length ? "No links match your search." : "No menu links have been saved yet."}</p> : (
+            <div className="space-y-3">{filtered.map((item) => {
+              const ItemIcon = icons[item.icon || ""] || ShieldCheck;
+              const index = items.findIndex((row) => row.id === item.id);
+              return <article key={item.id} className="rounded-2xl border border-white/15 p-4">
+                <h3 className="flex items-center gap-3 font-bold"><ItemIcon className="h-5 w-5 shrink-0" aria-hidden="true" />{item.label}</h3>
+                <p className="mt-2 break-all text-xs text-slate-300">{item.href}</p>
+                <p className="mt-2 text-xs text-slate-300">{item.is_enabled ? "Enabled" : "Hidden"} · Order {item.sort_order}{item.is_coming_soon ? " · Coming soon" : ""}{item.disabled ? " · Unavailable" : ""}</p>
+                <p className="mt-2 text-xs text-slate-300">Permission: {item.permission_key || "All signed-in admins"}</p>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <button type="button" className={button} disabled={unavailable} onClick={() => edit(item)}>Edit</button>
+                  <button type="button" className={button} disabled={unavailable} onClick={() => void run(async () => { await request("PATCH", { id: item.id, is_enabled: !item.is_enabled }); }, item.is_enabled ? "The link was hidden." : "The link was enabled.")}>{item.is_enabled ? "Disable" : "Enable"}</button>
+                  <button type="button" className={button} aria-label={`Move ${item.label} up`} disabled={unavailable || index === 0} onClick={() => void move(item, -1)}>Up</button>
+                  <button type="button" className={button} aria-label={`Move ${item.label} down`} disabled={unavailable || index === items.length - 1} onClick={() => void move(item, 1)}>Down</button>
+                  <button type="button" className={button} disabled={unavailable} onClick={() => void run(async () => {
+                    const copyForm = { ...emptyForm, label: item.label, href: item.href || "" };
+                    const copyIcon = chooseIcon(copyForm, items, null);
+                    if (!copyIcon) throw new Error("No unused icon remains for a duplicate link.");
+                    await request("POST", { ...item, id: undefined, label: `${item.label} (copy)`, icon: copyIcon, sort_order: Math.max(...items.map((row) => row.sort_order)) + 1 });
+                  }, "A copy of the menu link was created.")}>Duplicate</button>
+                  <button type="button" className={`${button} text-red-200`} disabled={unavailable} onClick={() => setDeleteTarget(item)}>Delete</button>
                 </div>
-              </div>
-
-              <div>
-                <label className="mb-2 block text-sm font-medium text-white/80">
-                  Sort order
-                </label>
-
-                <input
-                  type="number"
-                  value={form.sort_order}
-                  onChange={(e) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      sort_order: Number(e.target.value) || 0,
-                    }))
-                  }
-                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none"
-                />
-              </div>
-
-              <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white/85">
-                <input
-                  type="checkbox"
-                  checked={form.is_enabled}
-                  onChange={(e) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      is_enabled: e.target.checked,
-                    }))
-                  }
-                />
-                Enabled
-              </label>
-
-              <div className="flex flex-wrap gap-3">
-                <button
-                  type="submit"
-                  disabled={saving || !form.icon}
-                  className="rounded-2xl bg-white px-5 py-3 text-sm font-bold text-black transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {saving
-                    ? "Saving..."
-                    : editingId
-                      ? "Update item"
-                      : "Create link"}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={resetEditor}
-                  className="rounded-2xl border border-white/15 px-5 py-3 text-sm font-semibold text-white/85 transition hover:bg-white/10"
-                >
-                  Clear
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-
-        <div className="space-y-6">
-          <div className="rounded-3xl border border-white/10 bg-white/10 p-5 shadow-xl backdrop-blur-xl">
-            <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <h2 className="text-lg font-bold text-white">
-                Social Media Moderation sidebar structure
-              </h2>
-
-              <button
-                type="button"
-                onClick={loadItems}
-                className="inline-flex items-center gap-2 rounded-2xl border border-white/15 px-4 py-2 text-sm font-semibold text-white/85 transition hover:bg-white/10"
-              >
-                <RefreshCw className="h-4 w-4" />
-                Refresh
-              </button>
-            </div>
-
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search label, URL, or icon..."
-              className="mb-5 w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-white/35"
-            />
-
-            {loading ? (
-              <div className="text-sm text-white/70">
-                Loading moderation sidebar items...
-              </div>
-            ) : filteredItems.length === 0 ? (
-              <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-4 text-sm text-white/60">
-                No moderation sidebar items yet.
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {filteredItems.map((item) => (
-                  <div
-                    key={item.id}
-                    className="rounded-2xl border border-white/10 bg-black/20 p-4"
-                  >
-                    <ItemRow
-                      item={item}
-                      onEdit={() => startEdit(item)}
-                      onDelete={() => handleDelete(item.id)}
-                      onMoveUp={() => moveItem(item, "up")}
-                      onMoveDown={() => moveItem(item, "down")}
-                      onToggle={() => toggleEnabled(item)}
-                      onDuplicate={() => duplicateItem(item)}
-                    />
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {deleteDialogOpen ? (
-        <div
-          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="delete-moderation-sidebar-title"
-        >
-          <div className="w-full max-w-lg overflow-hidden rounded-3xl border border-red-400/20 bg-[#17172b] shadow-2xl">
-            <div className="border-b border-white/10 p-6">
-              <div className="flex items-start gap-4">
-                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-red-400/20 bg-red-500/15 text-red-200">
-                  <AlertTriangle className="h-7 w-7" />
-                </div>
-
-                <div>
-                  <h2
-                    id="delete-moderation-sidebar-title"
-                    className="text-xl font-extrabold text-white"
-                  >
-                    Delete moderation sidebar item?
-                  </h2>
-
-                  <p className="mt-1 text-sm text-white/60">
-                    Please check before deleting this link.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-4 p-6">
-              <p className="text-sm leading-6 text-white/80">
-                Are you sure you want to delete this moderation sidebar item from the
-                Moderation system?
-              </p>
-
-              <div className="rounded-2xl border border-red-400/20 bg-red-500/10 p-4 text-sm text-red-100">
-                This cannot be undone. If this link is still needed, press
-                Cancel instead.
-              </div>
-            </div>
-
-            <div className="flex flex-col-reverse gap-3 border-t border-white/10 p-6 sm:flex-row sm:justify-end">
-              <button
-                type="button"
-                onClick={closeDeleteDialog}
-                disabled={deleting}
-                className="rounded-2xl border border-white/15 px-5 py-3 text-sm font-bold text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Cancel
-              </button>
-
-              <button
-                type="button"
-                onClick={confirmDelete}
-                disabled={deleting}
-                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-red-600 px-5 py-3 text-sm font-extrabold text-white shadow-lg shadow-red-950/30 transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {deleting ? (
-                  <>
-                    <RefreshCw className="h-4 w-4 animate-spin" />
-                    Deleting...
-                  </>
-                ) : (
-                  "Delete item"
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function QuickActionButton({
-  icon: Icon,
-  label,
-  onClick,
-}: {
-  icon: ElementType;
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="flex items-center gap-2 rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-left text-sm font-semibold text-white transition hover:bg-white/15"
-    >
-      <Icon className="h-4 w-4" />
-      {label}
-    </button>
-  );
-}
-
-function NoticeBox({
-  notice,
-  onRetry,
-}: {
-  notice: Notice;
-  onRetry: () => void;
-}) {
-  if (!notice) return null;
-
-  const isError = notice.type === "error";
-
-  return (
-    <div
-      className={clsx(
-        "mb-6 rounded-2xl border px-4 py-3 text-sm",
-        isError
-          ? "border-red-400/30 bg-red-500/10 text-red-200"
-          : "border-emerald-400/30 bg-emerald-500/10 text-emerald-200"
-      )}
-    >
-      <div className="flex items-start gap-3">
-        {isError ? (
-          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
-        ) : null}
-
-        <div className="min-w-0 flex-1">
-          <p className="font-bold">{notice.message}</p>
-
-          {isError && notice.details ? (
-            <details className="mt-3 rounded-xl bg-black/20 p-3">
-              <summary className="cursor-pointer font-bold">
-                Show full error details
-              </summary>
-
-              <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap break-words text-xs">
-                {toReadableDetails(notice.details)}
-              </pre>
-            </details>
-          ) : null}
-
-          {isError ? (
-            <button
-              type="button"
-              onClick={onRetry}
-              className="mt-3 inline-flex items-center gap-2 rounded-xl bg-white/10 px-3 py-2 text-xs font-bold text-white hover:bg-white/20"
-            >
-              <RefreshCw className="h-3.5 w-3.5" />
-              Retry
-            </button>
-          ) : null}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ItemRow({
-  item,
-  onEdit,
-  onDelete,
-  onMoveUp,
-  onMoveDown,
-  onToggle,
-  onDuplicate,
-}: {
-  item: ModerationSidebarItem;
-  onEdit: () => void;
-  onDelete: () => void;
-  onMoveUp: () => void;
-  onMoveDown: () => void;
-  onToggle: () => void;
-  onDuplicate: () => void;
-}) {
-  const iconName =
-    item.icon && iconMap[item.icon]
-      ? item.icon
-      : inferModerationIconName(item.label, item.href);
-  const Icon = getIcon(iconName);
-  const duplicateIcon = false;
-
-  return (
-    <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/10 text-white">
-            <Icon className="h-4 w-4" />
-          </div>
-
-          <div className="text-sm font-bold text-white">{item.label}</div>
-
-          <span className="rounded-full border border-white/10 bg-white/10 px-2 py-0.5 text-[11px] text-white/70">
-            {iconName}
-          </span>
-
-          {item.is_enabled ? (
-            <span className="rounded-full border border-emerald-400/20 bg-emerald-500/10 px-2 py-0.5 text-[11px] text-emerald-200">
-              enabled
-            </span>
-          ) : (
-            <span className="rounded-full border border-red-400/20 bg-red-500/10 px-2 py-0.5 text-[11px] text-red-200">
-              disabled
-            </span>
+              </article>;
+            })}</div>
           )}
-        </div>
-
-        <div className="mt-1 break-all text-xs text-white/60">{item.href}</div>
-        <div className="mt-1 text-xs text-white/40">
-          Sort order: {item.sort_order}
-        </div>
+        </section>
       </div>
-
-      <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={onToggle}
-          className="rounded-xl border border-white/15 px-3 py-2 text-xs font-semibold text-white/85 transition hover:bg-white/10"
-        >
-          {item.is_enabled ? "Disable" : "Enable"}
-        </button>
-
-        <button
-          type="button"
-          onClick={onMoveUp}
-          className="rounded-xl border border-white/15 px-3 py-2 text-xs font-semibold text-white/85 transition hover:bg-white/10"
-        >
-          Up
-        </button>
-
-        <button
-          type="button"
-          onClick={onMoveDown}
-          className="rounded-xl border border-white/15 px-3 py-2 text-xs font-semibold text-white/85 transition hover:bg-white/10"
-        >
-          Down
-        </button>
-
-        <button
-          type="button"
-          onClick={onDuplicate}
-          className="rounded-xl border border-white/15 px-3 py-2 text-xs font-semibold text-white/85 transition hover:bg-white/10"
-        >
-          Duplicate
-        </button>
-
-        <button
-          type="button"
-          onClick={onEdit}
-          className="rounded-xl border border-white/15 px-3 py-2 text-xs font-semibold text-white/85 transition hover:bg-white/10"
-        >
-          Edit
-        </button>
-
-        <button
-          type="button"
-          onClick={onDelete}
-          className="rounded-xl border border-red-400/20 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-200 transition hover:bg-red-500/20"
-        >
-          Delete
-        </button>
-      </div>
+      <dialog ref={dialog} onCancel={(event) => { if (busy) event.preventDefault(); else setDeleteTarget(null); }} onClose={() => setDeleteTarget(null)} className="w-full max-w-lg rounded-3xl border border-white/20 bg-slate-900 p-6 text-white backdrop:bg-black/70" aria-labelledby="delete-menu-title">
+        <h2 id="delete-menu-title" className="text-xl font-bold">Delete this menu link?</h2>
+        <p className="mt-3 text-sm">{deleteTarget?.label} will be removed from the saved navigation. The destination page will remain.</p>
+        <div className="mt-6 flex gap-3"><button type="button" className={button} disabled={busy} onClick={() => { dialog.current?.close(); setDeleteTarget(null); }}>Cancel</button>
+          <button type="button" className={`${button} bg-red-700`} disabled={busy} onClick={() => { const target = deleteTarget; if (!target) return; void run(async () => { await request("DELETE", undefined, "?id=" + encodeURIComponent(target.id)); dialog.current?.close(); setDeleteTarget(null); if (editingId === target.id) reset(); }, "The menu link was deleted."); }}>Delete link</button></div>
+      </dialog>
     </div>
   );
 }

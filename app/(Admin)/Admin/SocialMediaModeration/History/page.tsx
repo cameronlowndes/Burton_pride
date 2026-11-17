@@ -1,3 +1,4 @@
+import { requireModerationScreen } from "@/lib/moderation/access";
 import type { Metadata } from "next";
 
 import HistoryPage from "../../components/SocialMediaModeration/client/HistoryPage";
@@ -18,6 +19,7 @@ type HistoryPageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
 
-export default function HistoryRoute({ searchParams }: HistoryPageProps) {
+export default async function HistoryRoute({ searchParams }: HistoryPageProps) {
+  await requireModerationScreen();
   return <HistoryPage searchParams={searchParams} />;
 }

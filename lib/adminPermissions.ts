@@ -25,6 +25,10 @@ export type CurrentAdmin = {
 };
 
 export const ALL_PERMISSION_KEYS = [
+  "moderation:view",
+  "moderation:review",
+  "moderation:control",
+  "moderation:export",
   // Admin Portal
   "admin:dashboard:view",
   "admin:users:view",
@@ -208,6 +212,7 @@ type AdminLookupReason =
   | "revoked_admin_session"
   | "mfa_required"
   | "admin_users_query_failed"
+  | "security_session_query_failed"
   | "admin_record_missing"
   | "admin_record_inactive"
   | "admin_record_duplicate"
@@ -473,7 +478,7 @@ export async function getCurrentAdminLookup(): Promise<AdminLookupResult> {
 
     return {
       ok: false,
-      reason: "invalid_admin_session",
+      reason: "security_session_query_failed",
       userId: null,
       sessionId: null,
       email: null,
@@ -889,3 +894,4 @@ export function getPermissionKeysFromAdmin(
 ) {
   return admin.permissionKeys;
 }
+

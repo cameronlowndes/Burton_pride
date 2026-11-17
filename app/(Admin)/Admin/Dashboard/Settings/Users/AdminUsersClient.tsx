@@ -92,6 +92,16 @@ const roleOptions: {
 
 const permissionGroups: PermissionGroup[] = [
   {
+    title: "Social Media Moderation",
+    description: "Viewing is required alongside each action permission. Policy approval and manual captures remain Main Admin only.",
+    permissions: [
+      { key: "moderation:view", label: "View moderation", description: "Read moderation screens, captured comments, evidence and service status." },
+      { key: "moderation:review", label: "Review moderation", description: "Record human reviews and attach screenshots; also requires View moderation." },
+      { key: "moderation:control", label: "Control moderation", description: "Run service commands and connection tests; also requires View moderation." },
+      { key: "moderation:export", label: "Export evidence", description: "Download text, Word and image evidence; also requires View moderation." },
+    ],
+  },
+  {
     title: "Admin Portal",
     description: "Core portal access, dashboard and admin account management.",
     permissions: [
@@ -1885,3 +1895,4 @@ function StatCard({
     </div>
   );
 }
+
