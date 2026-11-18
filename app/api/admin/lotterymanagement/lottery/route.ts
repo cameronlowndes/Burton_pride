@@ -151,6 +151,51 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json();
 
+    const prizes: { name: string; declared_value: number | null; description: string | null }[] = [];
+    if (body.prizes !== undefined) {
+      if (!Array.isArray(body.prizes) || body.prizes.length === 0) {
+        return NextResponse.json({ ok: false, error: "Enter at least one prize." }, { status: 400 });
+      }
+
+      if (!hasLotteryPermission(admin, "lottery:prizes:manage")) {
+        return NextResponse.json(
+          { ok: false, error: "You do not have permission to create prizes." },
+          { status: 403 },
+        );
+      }
+
+      for (const [index, prize] of body.prizes.entries()) {
+        const name = typeof prize?.name === "string" ? prize.name.trim() : "";
+        if (!name) {
+          return NextResponse.json({ ok: false, error: `Enter a name for prize ${index + 1}.` }, { status: 400 });
+        }
+
+        const valueAtDraw = prize.value_at_draw === true;
+        const calculationRule = typeof prize.calculation_rule === "string" ? prize.calculation_rule.trim() : "";
+        if (valueAtDraw && (!calculationRule || calculationRule.length > 1000)) {
+          return NextResponse.json({ ok: false, error: `Explain how prize ${index + 1} will be calculated before sales begin.` }, { status: 400 });
+        }
+        if (valueAtDraw && prize.declared_value != null && prize.declared_value !== "") {
+          return NextResponse.json({ ok: false, error: `Prize ${index + 1} cannot have both a pending and fixed amount.` }, { status: 400 });
+        }
+        const value = prize.declared_value;
+        const declaredValue = valueAtDraw || value == null || value === "" ? null : Number(value);
+        if (declaredValue !== null && (
+          (typeof value !== "number" && typeof value !== "string") ||
+          !/^\d+(?:\.\d{1,2})?$/.test(String(value)) ||
+          !Number.isFinite(declaredValue)
+        )) {
+          return NextResponse.json({ ok: false, error: `Prize ${index + 1} has an invalid declared value.` }, { status: 400 });
+        }
+
+        prizes.push({
+          name,
+          declared_value: declaredValue,
+          description: valueAtDraw ? `Cash amount to be confirmed after sales close and before the draw. Calculation: ${calculationRule}` : null,
+        });
+      }
+    }
+
     const title = String(body.title || "").trim();
     const slug = String(body.slug || "").trim().toLowerCase();
     const lotteryType = String(
@@ -476,11 +521,14 @@ export async function POST(req: NextRequest) {
       is_active: true,
     };
 
-    const { data, error } = await supabase
-      .from(TABLE)
-      .insert(payload)
-      .select("*")
-      .single();
+    const { data: result, error } = prizes.length
+      ? await getAuditServiceClient().rpc("create_lottery_with_prizes", {
+          lottery_data: payload,
+          prize_data: prizes,
+        })
+      : await supabase.from(TABLE).insert(payload).select("*").single();
+
+    const data = prizes.length ? result?.lottery : result;
 
     if (error) {
       console.error(
@@ -523,6 +571,21 @@ export async function POST(req: NextRequest) {
         ? `Lottery "${data.title}" was created as a draft with paper ticketing enabled. No paper tickets were generated or reserved; create a paper-ticket batch separately.`
         : `Lottery "${data.title}" was created as a draft.`,
     });
+
+    if (prizes.length) {
+      for (const prize of result.prizes) {
+        await writeLotteryAuditSafe({
+          admin,
+          actionCode: "prize.created",
+          actionLabel: "Prize created",
+          actionGroup: "prize",
+          riskLevel: "medium",
+          entityType: "prize",
+          entityId: prize.id,
+          reason: `Prize "${prize.name}" was added to lottery "${data.title}".`,
+        });
+      }
+    }
 
     return NextResponse.json(
       {
