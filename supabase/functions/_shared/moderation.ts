@@ -22,6 +22,17 @@ export type Event = {
   comment_id: string;
   content: string;
 };
+export function hasPageFeedSubscription(payload: unknown, appId: string): boolean {
+  if (!appId || !payload || typeof payload !== "object") return false;
+  const data = (payload as { data?: unknown }).data;
+  return Array.isArray(data) && data.some((entry) => {
+    if (!entry || typeof entry !== "object") return false;
+    const app = entry as { id?: unknown; subscribed_fields?: unknown };
+    return app.id === appId &&
+      Array.isArray(app.subscribed_fields) &&
+      app.subscribed_fields.includes("feed");
+  });
+}
 export function validPolicy(value: unknown): value is Policy {
   if (!value || typeof value !== "object") return false;
   const p = value as Policy;
@@ -121,7 +132,7 @@ export function normalizeEvents(
         platform === "facebook"
           ? change.field === "feed" &&
             v.item === "comment" &&
-            ["add", "edited"].includes(String(v.verb))
+            ["add", "edit", "edited"].includes(String(v.verb))
           : change.field === "comments";
       const id = platform === "facebook" ? v.comment_id : v.id;
       const text = platform === "facebook" ? v.message : v.text;

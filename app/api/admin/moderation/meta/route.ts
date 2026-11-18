@@ -1,6 +1,6 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { supabaseAdmin as db } from "@/lib/supabase/supabaseAdmin";
+import { getSupabaseAdmin } from "@/lib/supabase/supabaseAdmin";
 import { normalizeEvents } from "@/supabase/functions/_shared/moderation";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -8,14 +8,16 @@ export async function GET(request: NextRequest) {
   const p = request.nextUrl.searchParams;
   const expected = process.env.META_WEBHOOK_VERIFY_TOKEN;
   const supplied = p.get("hub.verify_token") || "";
+  const challenge = p.get("hub.challenge");
   if (
     !expected ||
+    !challenge || challenge.length > 1024 ||
     p.get("hub.mode") !== "subscribe" ||
     Buffer.byteLength(expected) !== Buffer.byteLength(supplied) ||
     !timingSafeEqual(Buffer.from(expected), Buffer.from(supplied))
   )
     return new NextResponse("Forbidden", { status: 403 });
-  return new NextResponse(p.get("hub.challenge") || "", {
+  return new NextResponse(challenge, {
     headers: { "Content-Type": "text/plain", "Cache-Control": "no-store" },
   });
 }
@@ -59,7 +61,7 @@ export async function POST(request: NextRequest) {
         )
         .digest("hex"),
     }));
-    const { error } = await db
+    const { error } = await getSupabaseAdmin()
       .from("moderation_jobs")
       .upsert(rows, { onConflict: "event_key", ignoreDuplicates: true });
     // Acknowledge only after durable storage. Paused service still preserves received events.

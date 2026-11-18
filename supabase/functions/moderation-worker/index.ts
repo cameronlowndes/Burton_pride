@@ -1,6 +1,7 @@
 // A bounded Supabase Edge invocation, scheduled by pg_cron. No permanent process is simulated.
 import {
   classify,
+  hasPageFeedSubscription,
   validPolicy,
   type Decision,
   type Platform,
@@ -100,22 +101,27 @@ async function connection(platform: Platform) {
     );
     if (account.id !== c.id)
       throw new Error("Configured account did not match Meta response");
+    // Instagram Graph API webhooks require a subscription on the connected
+    // Facebook Page. /{ig-user-id}/subscribed_apps is not the Page edge.
+    const page = config("facebook");
+    if (!page.id || !page.token)
+      throw new Error("Connected Facebook Page ID and access token are required for webhook subscriptions.");
     const subscriptions = await graph(
-      platform,
-      `${encodeURIComponent(c.id)}/subscribed_apps`,
+      "facebook",
+      `${encodeURIComponent(page.id)}/subscribed_apps`,
     );
-    const field = platform === "facebook" ? "feed" : "comments";
-    if (
-      !subscriptions.data?.some(
-        (app: { id: string; subscribed_fields?: string[] }) =>
-          app.id === env("META_APP_ID") &&
-          app.subscribed_fields?.includes(field),
-      )
-    )
+    if (!hasPageFeedSubscription(subscriptions, env("META_APP_ID")))
       throw new Error(
-        `App is not subscribed to ${field} events for this account.`,
+        "App is not subscribed to feed events on the connected Facebook Page.",
       );
-    return { platform, status: "Connected", error: null };
+    return {
+      platform,
+      status: "Connected",
+      // This is connectivity, not proof of Instagram comments delivery.
+      error: platform === "instagram"
+        ? "Account and Page subscription checked. Confirm Instagram comments in the App Dashboard and test a real comment delivery."
+        : null,
+    };
   } catch (error) {
     return {
       platform,
