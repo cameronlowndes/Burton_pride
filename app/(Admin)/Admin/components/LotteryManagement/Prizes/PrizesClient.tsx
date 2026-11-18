@@ -51,6 +51,28 @@ type ApiResponse = {
     request_id?: string;
 };
 const API_ROUTE = "/api/admin/lotterymanagement/prizes";
+const PENDING_CASH_PREFIX = "Cash amount to be confirmed after sales close and before the draw. Calculation: ";
+const FINAL_CASH_PREFIX = "Cash amount calculated after sales close. Calculation: ";
+
+function splitCashDescription(value: string | null) {
+    const text = value || "";
+    const pending = text.startsWith(PENDING_CASH_PREFIX);
+    const final = text.startsWith(FINAL_CASH_PREFIX);
+    if (!pending && !final) return { valuePending: false, calculationRule: "", description: text };
+    const remainder = text.slice((pending ? PENDING_CASH_PREFIX : FINAL_CASH_PREFIX).length);
+    const separator = remainder.indexOf("\n\n");
+    return {
+        valuePending: pending,
+        calculationRule: (separator < 0 ? remainder : remainder.slice(0, separator)).trim(),
+        description: separator < 0 ? "" : remainder.slice(separator + 2),
+    };
+}
+
+function prizeDescription(valuePending: boolean, calculationRule: string, description: string) {
+    const rule = calculationRule.trim();
+    const detail = description.trim();
+    return rule ? `${valuePending ? PENDING_CASH_PREFIX : FINAL_CASH_PREFIX}${rule}${detail ? `\n\n${detail}` : ""}` : detail || null;
+}
 const STATUS_OPTIONS: Array<{
     value: PrizeStatus | "all";
     label: string;
@@ -92,6 +114,12 @@ function formatMoney(value: number | null) {
         currency: "GBP",
     }).format(Number(value || 0));
 }
+function formatPrizeValue(prize: PrizeRecord) {
+    return prize.declared_value == null && prize.description?.startsWith(PENDING_CASH_PREFIX)
+        ? "To be confirmed before draw"
+        : formatMoney(prize.declared_value);
+}
+
 function formatDate(value: string | null) {
     if (!value)
         return "Not recorded";
@@ -110,6 +138,8 @@ type PrizeForm = {
     lottery_id: string;
     name: string;
     description: string;
+    valuePending: boolean;
+    calculationRule: string;
     image_url: string;
     quantity: string;
     declared_value: string;
@@ -268,6 +298,8 @@ function newPrizeForm(lotteryId: string, items: PrizeRecord[]): PrizeForm {
         lottery_id: lotteryId,
         name: "",
         description: "",
+        valuePending: false,
+        calculationRule: "",
         image_url: "",
         quantity: "1",
         declared_value: "",
@@ -435,7 +467,7 @@ export default function PrizesClient() {
         setForm({
             lottery_id: item.lottery_id,
             name: item.name,
-            description: item.description || "",
+            ...splitCashDescription(item.description),
             image_url: item.image_url || "",
             quantity: item.quantity == null ? "" : String(item.quantity),
             declared_value: item.declared_value === null ? "" : String(item.declared_value),
@@ -547,7 +579,19 @@ export default function PrizesClient() {
             setError("Display order must be a non-negative whole number.");
             return;
         }
-        if (form.declared_value && (!/^\d+(?:\.\d{1,2})?$/.test(form.declared_value) || !Number.isSafeInteger(Math.round(Number(form.declared_value) * 100)))) {
+        if (form.valuePending && !form.calculationRule.trim()) {
+            setError("Describe how the cash prize amount depends on ticket sales before saving it.");
+            return;
+        }
+        if (form.calculationRule.trim().length > 1000) {
+            setError("Keep the cash prize calculation rule under 1,000 characters.");
+            return;
+        }
+        if (!form.valuePending && form.calculationRule.trim() && !form.declared_value) {
+            setError("Enter the final cash prize amount before clearing the pending amount option.");
+            return;
+        }
+        if (!form.valuePending && form.declared_value && (!/^\d+(?:\.\d{1,2})?$/.test(form.declared_value) || !Number.isSafeInteger(Math.round(Number(form.declared_value) * 100)))) {
             setError("Declared value must be non-negative and have no more than two decimal places.");
             return;
         }
@@ -556,8 +600,8 @@ export default function PrizesClient() {
             return;
         }
         const body: Record<string, unknown> = {
-            lottery_id: form.lottery_id, name: form.name.trim(), description: form.description.trim() || null,
-            image_url: form.image_url.trim() || null, quantity: Number(form.quantity), declared_value: form.declared_value ? Number(form.declared_value) : null,
+            lottery_id: form.lottery_id, name: form.name.trim(), description: prizeDescription(form.valuePending, form.calculationRule, form.description),
+            image_url: form.image_url.trim() || null, quantity: Number(form.quantity), declared_value: form.valuePending ? null : form.declared_value ? Number(form.declared_value) : null,
             is_donated: form.is_donated, donor_name: form.donor_name.trim() || null, sponsor_name: form.sponsor_name.trim() || null,
             display_order: Number(form.display_order), eligibility_restrictions: form.eligibility_restrictions.trim() || null,
             fulfilment_requirements: form.fulfilment_requirements.trim() || null, fulfilment_notes: form.fulfilment_notes.trim() || null,
@@ -785,7 +829,7 @@ function PrizeRow({ item, onView, onEdit, onMakeReady, makingReady, disabled, }:
               </p>) : null}
 
             <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-              <Info label="Value" value={formatMoney(item.declared_value)}/>
+              <Info label="Value" value={formatPrizeValue(item)}/>
               <Info label="Quantity" value={item.quantity == null ? "Unavailable" : String(item.quantity)}/>
               <Info label="Display order" value={item.display_order == null ? "Unavailable" : String(item.display_order)}/>
               <Info label="Donor / sponsor" value={item.donor_name || item.sponsor_name || "Not set"}/>
@@ -846,7 +890,7 @@ function PrizeDetailsModal({ prize, onClose, }: {
         <div className="overflow-y-auto p-5 md:p-6">
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <DetailCard label="Status" value={statusLabel(prize.status)}/>
-            <DetailCard label="Declared value" value={formatMoney(prize.declared_value)}/>
+            <DetailCard label="Declared value" value={formatPrizeValue(prize)}/>
             <DetailCard label="Quantity" value={prize.quantity == null ? "Unavailable" : String(prize.quantity)}/>
             <DetailCard label="Source" value={prize.is_donated === true ? "Donated" : prize.is_donated === false ? "Purchased" : "Unavailable"}/>
           </div>
@@ -951,9 +995,26 @@ function PrizeEditor({ form, setForm, lotteries, editing, saving, blocked, error
               <input type="number" min="1" value={form.quantity} onChange={(e) => setForm((p: PrizeForm) => ({ ...p, quantity: e.target.value }))} className={inputClass}/>
             </Field>
 
-            <Field label="Declared value">
-              <input type="number" min="0" step="0.01" value={form.declared_value} onChange={(e) => setForm((p: PrizeForm) => ({ ...p, declared_value: e.target.value }))} className={inputClass}/>
+            <Field label="Declared value (£)">
+              <input type="number" min="0" step="0.01" value={form.declared_value} disabled={form.valuePending} onChange={(e) => setForm((p: PrizeForm) => ({ ...p, declared_value: e.target.value }))} className={inputClass}/>
             </Field>
+
+            <div className="md:col-span-2 rounded-xl border border-white/10 p-4">
+              <label className="flex items-center gap-3 text-sm font-semibold text-white">
+                <input type="checkbox" checked={form.valuePending} onChange={(e) => setForm((p: PrizeForm) => ({ ...p, valuePending: e.target.checked, declared_value: e.target.checked ? "" : p.declared_value }))} className="h-5 w-5"/>
+                Cash prize amount depends on tickets sold
+              </label>
+              {form.valuePending ? (
+                <div className="mt-3">
+                  <Field label="How the amount is calculated (required)">
+                    <textarea value={form.calculationRule} onChange={(e) => setForm((p: PrizeForm) => ({ ...p, calculationRule: e.target.value }))} className={`${inputClass} min-h-24`} placeholder="For example: 30% of ticket sales, capped at £500." required/>
+                  </Field>
+                  <p className="mt-2 text-xs text-amber-100">Show this rule to buyers before sales begin. Enter the final amount here after sales close and before the draw. Keep prizes and expenses within 80% of ticket sales.</p>
+                </div>
+              ) : form.calculationRule ? (
+                <p className="mt-2 text-xs text-white/65">The published calculation rule will stay in the prize description when you enter the final value.</p>
+              ) : null}
+            </div>
 
             <div><p className="text-sm font-bold text-white">Status: {statusLabel(editing?.status || "draft")}</p><p className="mt-2 text-xs text-white/65">Winner, claim and fulfilment statuses use separate workflows. Ordinary edits do not change status.</p></div>
             <Field label="Display order">

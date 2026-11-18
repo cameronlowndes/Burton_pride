@@ -300,6 +300,7 @@ export default function LotteriesClient() {
   const [year, setYear] = useState("all");
   const [sort, setSort] = useState("created_desc");
   const [createOpen, setCreateOpen] = useState(false);
+  const [createdPrizeLottery, setCreatedPrizeLottery] = useState<string | null>(null);
 
   useEffect(() => {
     void loadItems();
@@ -1236,6 +1237,14 @@ export default function LotteriesClient() {
         />
       </section>
 
+      {createdPrizeLottery && !testMode ? (
+        <section role="status" className="rounded-2xl border border-emerald-400/30 bg-emerald-500/10 p-4 text-emerald-100">
+          <p className="font-bold">Draft created: {createdPrizeLottery}</p>
+          <p className="mt-1 text-sm">Review the prize and set any pending cash amount after sales close, before the draw.</p>
+          <Link href="/Admin/LotteryManagement/Prizes" className="mt-3 inline-block rounded-xl border border-emerald-300/50 px-4 py-2 text-sm font-bold hover:bg-emerald-500/20">Open Prizes page</Link>
+        </section>
+      ) : null}
+
       {detailedError ? (
         <section
           role="alert"
@@ -1572,6 +1581,7 @@ export default function LotteriesClient() {
             return;
           }
 
+          if (createdLottery) setCreatedPrizeLottery(createdLottery.title);
           await loadItems();
         }}
       />

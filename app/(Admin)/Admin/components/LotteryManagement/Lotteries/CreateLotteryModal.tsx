@@ -53,7 +53,7 @@ type CreateLotteryModalProps = {
   testMode?: boolean;
 };
 
-const EMPTY_PRIZE = { id: 0, name: "", declaredValue: "" };
+const EMPTY_PRIZE = { id: 0, name: "", declaredValue: "", valueAtDraw: false, calculationRule: "" };
 
 const INITIAL_FORM = {
   title: "",
@@ -118,8 +118,12 @@ export default function CreateLotteryModal({
 
   const [prizes, setPrizes] = useState([EMPTY_PRIZE]);
 
-  function updatePrize(id: number, field: "name" | "declaredValue", value: string) {
+  function updatePrize(id: number, field: "name" | "declaredValue" | "calculationRule", value: string) {
     setPrizes((rows) => rows.map((row) => row.id === id ? { ...row, [field]: value } : row));
+  }
+
+  function setPrizeValueAtDraw(id: number, enabled: boolean) {
+    setPrizes((rows) => rows.map((row) => row.id === id ? { ...row, valueAtDraw: enabled, declaredValue: enabled ? "" : row.declaredValue } : row));
   }
 
   function resetCreateForm() {
@@ -248,7 +252,11 @@ export default function CreateLotteryModal({
         setCreateError(`Enter a name for prize ${index + 1}.`);
         return;
       }
-      if (prize.declaredValue && !/^\d+(?:\.\d{1,2})?$/.test(prize.declaredValue)) {
+      if (prize.valueAtDraw && !prize.calculationRule.trim()) {
+        setCreateError(`Explain how the amount for prize ${index + 1} will be calculated before selling tickets.`);
+        return;
+      }
+      if (!prize.valueAtDraw && prize.declaredValue && !/^\d+(?:\.\d{1,2})?$/.test(prize.declaredValue)) {
         setCreateError(`Enter a valid value in pounds for prize ${index + 1}.`);
         return;
       }
@@ -296,7 +304,9 @@ export default function CreateLotteryModal({
         ...createForm,
         prizes: prizes.map((prize) => ({
           name: prize.name.trim(),
-          declared_value: prize.declaredValue || null,
+          declared_value: prize.valueAtDraw ? null : (prize.declaredValue || null),
+          value_at_draw: prize.valueAtDraw,
+          calculation_rule: prize.valueAtDraw ? prize.calculationRule.trim() : null,
         })),
         ticket_price: Number(createForm.ticket_price),
         minimum_age: REQUIRED_MINIMUM_AGE,
@@ -811,7 +821,7 @@ export default function CreateLotteryModal({
 
                   <fieldset disabled={creating} className="space-y-3 md:col-span-2">
                     <legend className="mb-2 font-bold text-white">Prizes</legend>
-                    <p className="text-sm text-white/70">Enter one prize to create the draft. Add more if needed.</p>
+                    <p className="text-sm text-white/70">Enter at least one prize. After saving, you can review it and add more on the Prizes page.</p>
                     {prizes.map((prize, index) => (
                       <fieldset key={prize.id} className="grid gap-3 rounded-2xl border border-white/15 p-4 sm:grid-cols-2">
                         <legend className="px-1 text-sm font-bold text-white">Prize {index + 1}</legend>
@@ -829,10 +839,23 @@ export default function CreateLotteryModal({
                             min="0"
                             step="0.01"
                             value={prize.declaredValue}
+                            disabled={prize.valueAtDraw}
                             onChange={(event) => updatePrize(prize.id, "declaredValue", event.target.value)}
                             className={inputClass}
                           />
                         </Field>
+                        <label className="flex items-center gap-2 text-sm text-white/80 sm:col-span-2">
+                          <input type="checkbox" checked={prize.valueAtDraw} onChange={(event) => setPrizeValueAtDraw(prize.id, event.target.checked)} />
+                          Calculate the cash prize after ticket sales close, before the draw
+                        </label>
+                        {prize.valueAtDraw && (
+                          <div className="sm:col-span-2">
+                            <Field label="How the cash amount will be calculated (required)">
+                              <textarea value={prize.calculationRule} onChange={(event) => updatePrize(prize.id, "calculationRule", event.target.value)} className={inputClass} rows={3} required placeholder="For example: 30% of gross ticket sales, capped at £500." />
+                            </Field>
+                            <p className="mt-2 text-xs text-amber-100">Publish this rule before sales begin. Set the final amount on the Prizes page after sales close and before the draw. At least 20% of proceeds must support the good cause, and prizes plus expenses must stay within 80%.</p>
+                          </div>
+                        )}
                         {index > 0 && (
                           <button
                             type="button"
@@ -863,7 +886,7 @@ export default function CreateLotteryModal({
                       <div>
                         <h3 className="font-bold text-emerald-100">Ready to create the draft</h3>
                         <p className="mt-1 text-sm leading-6 text-emerald-100/75">
-                          This will create the lottery record and reserve the slug. It will remain Draft until the separate compliance approval and publishing process is completed.
+                          This will create the lottery and its prize records as a draft. Review them on the Prizes page before the separate compliance approval and publishing process.
                         </p>
                       </div>
                     </div>
